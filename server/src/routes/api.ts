@@ -87,7 +87,7 @@ export function apiRoutes(app: FastifyInstance, db: Db) {
         return reply.code(401).send({ error: 'Identifiants invalides' });
       }
       reply.setCookie(SESSION_COOKIE, createSession(user), {
-        path: '/',
+        path: config.basePath || '/',
         httpOnly: true,
         sameSite: 'strict',
         secure: config.production,
@@ -100,7 +100,7 @@ export function apiRoutes(app: FastifyInstance, db: Db) {
   app.get('/api/auth-info', async () => ({ totp: Boolean(config.adminTotpSecret) }));
 
   app.post('/api/logout', async (_req, reply) => {
-    reply.clearCookie(SESSION_COOKIE, { path: '/' });
+    reply.clearCookie(SESSION_COOKIE, { path: config.basePath || '/' });
     return { ok: true };
   });
 

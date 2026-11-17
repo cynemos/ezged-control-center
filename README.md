@@ -82,6 +82,20 @@ powershell -ExecutionPolicy Bypass -File agent\ezged-cc-agent.ps1 -ConfigPath C:
 3. `docker compose up -d --build`.
 4. Double authentification : `docker compose exec app node dist/tools/totp-new.js`, coller le secret dans `ADMIN_TOTP_SECRET`, puis `docker compose up -d`.
 
+## Production sur Windows avec Tailscale Funnel (sans NAT)
+
+Pour héberger la console sur un serveur Windows sans redirection de port : Tailscale Funnel publie la console en HTTPS sous un chemin, par exemple `https://srv-papercut.tailfdec83.ts.net/ezgedcc/`, à côté des autres applications déjà publiées.
+
+1. Sur le poste de développement : `powershell -ExecutionPolicy Bypass -File deploy\windows\build-package.ps1`, qui produit `dist-package\ezgedcc-console.zip`.
+2. Copier le zip sur le serveur et l'extraire.
+3. En PowerShell administrateur, dans le dossier extrait : `powershell -ExecutionPolicy Bypass -File .\install-console.ps1`.
+
+Le script installe un Node.js portable (empreinte vérifiée) dans `C:\EzGedControlCenter\node`, génère les secrets, crée la tâche planifiée `EzGed ControlCenter Console` (SYSTEM, au démarrage, relance automatique), fait écouter la console sur `127.0.0.1:8797` uniquement et ajoute `tailscale funnel --set-path /ezgedcc`. Il affiche l'adresse et le mot de passe administrateur une seule fois. Relancer le même script pour une mise à jour : `.env` et les données sont conservés.
+
+Options : `-Port`, `-BasePath`, `-InstallDir`, `-NodeVersion`, `-SkipFunnel`.
+
+La variable `BASE_PATH` permet de servir la console sous n'importe quel préfixe ; l'interface et l'API s'adaptent toutes seules.
+
 ## Installer l'agent sur un serveur
 
 Depuis la page **Ajouter un serveur** de la console : copier le dossier `agent\` sur le serveur, puis en PowerShell administrateur :

@@ -7,6 +7,12 @@ try {
 
 const env = process.env;
 
+function normalizeBasePath(v: string): string {
+  const p = v.trim().replace(/^\/+|\/+$/g, '');
+  if (p && !/^[A-Za-z0-9._~-]+(\/[A-Za-z0-9._~-]+)*$/.test(p)) throw new Error(`BASE_PATH invalide : ${v}`);
+  return p ? `/${p}` : '';
+}
+
 function num(name: string, def: number): number {
   const v = Number(env[name]);
   return Number.isFinite(v) && env[name] !== undefined && env[name] !== '' ? v : def;
@@ -32,6 +38,8 @@ export const config = {
   // Clé partagée utilisée une seule fois par l'installeur d'agent pour obtenir son jeton.
   enrollKey: env.ENROLL_KEY ?? '',
   publicUrl: (env.PUBLIC_URL ?? 'http://localhost:3000').replace(/\/+$/, ''),
+  // Préfixe de publication derrière un proxy partagé (ex. Tailscale Funnel : /ezgedcc). Vide = racine.
+  basePath: normalizeBasePath(env.BASE_PATH ?? ''),
 
   offlineMinutes: num('OFFLINE_MINUTES', 5),
   retentionDays: num('RETENTION_DAYS', 30),

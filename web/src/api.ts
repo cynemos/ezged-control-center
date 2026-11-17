@@ -7,9 +7,12 @@ export class ApiError extends Error {
   }
 }
 
+// Préfixe de publication, lu dans la balise <base> injectée par le serveur ('' à la racine).
+export const BASE_PATH = new URL(document.baseURI).pathname.replace(/\/+$/, '');
+
 export async function api<T = any>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const { json, ...rest } = init ?? {};
-  const res = await fetch(path, {
+  const res = await fetch(path.startsWith('/') ? BASE_PATH + path : path, {
     credentials: 'same-origin',
     ...rest,
     headers: json !== undefined ? { 'content-type': 'application/json', ...rest.headers } : rest.headers,
