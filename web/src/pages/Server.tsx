@@ -38,6 +38,7 @@ export default function Server() {
   const [range, setRange] = useState<string>('24h');
   const { data: points } = usePoll<Point[]>(`/api/servers/${id}/metrics?range=${range}`, 60_000);
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   if (error) return <p className="text-crit">{error}</p>;
   if (!s) return <p className="text-muted">Chargement…</p>;
@@ -73,8 +74,11 @@ export default function Server() {
             <span className="self-center text-xs text-muted">Pas d'ID RustDesk</span>
           )}
           <Button onClick={() => setEditing(!editing)}>Modifier</Button>
+          <Button variant="danger" onClick={() => setDeleting(true)}>Supprimer</Button>
         </div>
       </div>
+
+      {deleting && <DeleteConfirm s={s} onCancel={() => setDeleting(false)} />}
 
       {editing && <EditForm s={s} onDone={() => { setEditing(false); void reload(); }} />}
 
@@ -286,8 +290,42 @@ function Chart({ title, points, series, range, max }: { title: string; points: P
   );
 }
 
-function EditForm({ s, onDone }: { s: Detail; onDone: () => void }) {
+// Confirmation dans la page (pas de confirm() natif, que certains navigateurs bloquent).
+function DeleteConfirm({ s, onCancel }: { s: Detail; onCancel: () => void }) {
   const nav = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const remove = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api(`/api/servers/${s.id}`, { method: 'DELETE' });
+      nav('/');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-crit/60 bg-crit/10 p-4 text-sm">
+      <p>
+        Supprimer <strong>{s.name}</strong> ({s.hostname}) de la console, avec tout son historique ? Cette action est
+        définitive. Si l'agent tourne encore sur ce serveur, ses rapports seront refusés jusqu'à sa réinstallation.
+      </p>
+      {err && <p className="mt-2 text-crit">Échec de la suppression : {err}</p>}
+      <div className="mt-3 flex gap-2">
+        <Button variant="danger" onClick={remove} disabled={busy}>
+          {busy ? 'Suppression…' : 'Confirmer la suppression'}
+        </Button>
+        <Button onClick={onCancel} disabled={busy}>Annuler</Button>
+      </div>
+    </div>
+  );
+}
+
+function EditForm({ s, onDone }: { s: Detail; onDone: () => void }) {
   const [displayName, setDisplayName] = useState(s.name === s.hostname ? '' : s.name);
   const [clientName, setClientName] = useState(s.client ?? '');
   const [rustdeskId, setRustdeskId] = useState(s.rustdeskId ?? '');
@@ -297,11 +335,6 @@ function EditForm({ s, onDone }: { s: Detail; onDone: () => void }) {
   const save = async () => {
     await api(`/api/servers/${s.id}`, { method: 'PATCH', json: { displayName, clientName, rustdeskId, notes } });
     onDone();
-  };
-  const remove = async () => {
-    if (!confirm(`Supprimer ${s.name} de la console, avec tout son historique ? L'agent devra être réinstallé pour réapparaître.`)) return;
-    await api(`/api/servers/${s.id}`, { method: 'DELETE' });
-    nav('/');
   };
 
   return (
@@ -328,9 +361,6 @@ function EditForm({ s, onDone }: { s: Detail; onDone: () => void }) {
       <div className="mt-3 flex gap-2">
         <Button variant="primary" onClick={save}>Enregistrer</Button>
         <Button onClick={onDone}>Annuler</Button>
-        <span className="ml-auto">
-          <Button variant="danger" onClick={remove}>Supprimer</Button>
-        </span>
       </div>
     </Card>
   );
