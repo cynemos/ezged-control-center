@@ -16,7 +16,7 @@ export async function api<T = any>(path: string, init?: RequestInit & { json?: u
     body: json !== undefined ? JSON.stringify(json) : rest.body,
   });
   if (res.status === 401 && !path.startsWith('/api/login')) {
-    window.dispatchEvent(new Event('ezmon:unauthorized'));
+    window.dispatchEvent(new Event('ezgedcc:unauthorized'));
   }
   if (!res.ok) {
     let msg = res.statusText;

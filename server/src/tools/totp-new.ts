@@ -5,5 +5,5 @@ import { base32Encode } from '../auth.js';
 const secret = base32Encode(randomBytes(20));
 const user = process.env.ADMIN_USER ?? 'admin';
 console.log(`ADMIN_TOTP_SECRET=${secret}`);
-console.log(`otpauth://totp/EzMon:${encodeURIComponent(user)}?secret=${secret}&issuer=EzMon`);
+console.log(`otpauth://totp/EzGed%20ControlCenter:${encodeURIComponent(user)}?secret=${secret}&issuer=EzGed%20ControlCenter`);
 console.log("Ajoutez la clé dans votre application d'authentification (saisie manuelle ou QR code depuis l'URL).");

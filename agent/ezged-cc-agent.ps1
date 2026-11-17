@@ -1,15 +1,15 @@
 #Requires -Version 5.1
 <#
-  EzMon - agent de supervision pour serveur EzGED.
+  EzGed ControlCenter - agent de supervision pour serveur EzGED.
   Lance par une tache planifiee (compte SYSTEM) toutes les minutes.
-  Collecte l'etat du serveur et l'envoie en HTTPS a la console EzMon.
+  Collecte l'etat du serveur et l'envoie en HTTPS a la console EzGed ControlCenter.
   Ne lit JAMAIS les secrets d'EzGED : seules quelques cles de instance.conf sont extraites.
 
   Usage manuel :
-    powershell -ExecutionPolicy Bypass -File ezmon-agent.ps1 -DryRun -ForceInventory
+    powershell -ExecutionPolicy Bypass -File ezged-cc-agent.ps1 -DryRun -ForceInventory
 #>
 param(
-  [string]$ConfigPath = (Join-Path $env:ProgramData 'EzMon\config.json'),
+  [string]$ConfigPath = (Join-Path $env:ProgramData 'EzGedControlCenter\config.json'),
   [switch]$ForceInventory,
   [switch]$DryRun
 )

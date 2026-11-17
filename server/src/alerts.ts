@@ -144,11 +144,11 @@ export async function syncAlerts(db: Db, serverId: string, findings: Finding[], 
         f.severity,
         f.message,
       ]);
-      void notify(`[EzMon] ${f.severity === 'critical' ? 'CRITIQUE' : 'Alerte'} – ${label}`, f.message, log);
+      void notify(`[EzGed ControlCenter] ${f.severity === 'critical' ? 'CRITIQUE' : 'Alerte'} – ${label}`, f.message, log);
     } else if (existing.severity !== f.severity || existing.message !== f.message) {
       await db.query('UPDATE alerts SET severity = $2, message = $3 WHERE id = $1', [existing.id, f.severity, f.message]);
       if (existing.severity === 'warning' && f.severity === 'critical')
-        void notify(`[EzMon] CRITIQUE – ${label}`, f.message, log);
+        void notify(`[EzGed ControlCenter] CRITIQUE – ${label}`, f.message, log);
     }
   }
 
@@ -157,7 +157,7 @@ export async function syncAlerts(db: Db, serverId: string, findings: Finding[], 
     for (const a of open) {
       if (!active.has(a.rule)) {
         await db.query('UPDATE alerts SET closed_at = now() WHERE id = $1', [a.id]);
-        void notify(`[EzMon] Résolu – ${label}`, a.message, log);
+        void notify(`[EzGed ControlCenter] Résolu – ${label}`, a.message, log);
       }
     }
   }

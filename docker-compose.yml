@@ -1,12 +1,12 @@
 # Déploiement sur un VPS Linux : docker compose up -d --build
-# Prérequis : un nom de domaine (EZMON_DOMAIN) pointant sur le VPS, ports 80 et 443 ouverts.
+# Prérequis : un nom de domaine (EZGEDCC_DOMAIN) pointant sur le VPS, ports 80 et 443 ouverts.
 services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ezmon
-      POSTGRES_USER: ezmon
+      POSTGRES_DB: ezgedcc
+      POSTGRES_USER: ezgedcc
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?définir POSTGRES_PASSWORD dans .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -17,8 +17,8 @@ services:
     depends_on: [db]
     env_file: .env
     environment:
-      DATABASE_URL: postgres://ezmon:${POSTGRES_PASSWORD}@db:5432/ezmon
-      PUBLIC_URL: https://${EZMON_DOMAIN}
+      DATABASE_URL: postgres://ezgedcc:${POSTGRES_PASSWORD}@db:5432/ezgedcc
+      PUBLIC_URL: https://${EZGEDCC_DOMAIN}
       TRUST_PROXY: '1'
 
   caddy:
@@ -29,7 +29,7 @@ services:
       - '80:80'
       - '443:443'
     environment:
-      EZMON_DOMAIN: ${EZMON_DOMAIN:?définir EZMON_DOMAIN dans .env}
+      EZGEDCC_DOMAIN: ${EZGEDCC_DOMAIN:?définir EZGEDCC_DOMAIN dans .env}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

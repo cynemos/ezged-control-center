@@ -15,7 +15,7 @@ export default function Enroll() {
       <Card title="Installer l'agent sur un serveur EzGED">
         <ol className="list-decimal space-y-3 pl-5 text-sm">
           <li>
-            Copier le dossier <code className="text-accent">agent\</code> (3 scripts) sur le serveur, par exemple dans <code>C:\Temp\ezmon</code>.
+            Copier le dossier <code className="text-accent">agent\</code> (3 scripts) sur le serveur, par exemple dans <code>C:\Temp\ezgedcc</code>.
           </li>
           <li>
             Ouvrir PowerShell <strong>en administrateur</strong> dans ce dossier et lancer :
@@ -38,11 +38,11 @@ export default function Enroll() {
         <ul className="space-y-1.5 text-sm">
           <li><code>-NchpRoot D:\nchp</code> : racine EzGED si elle n'est pas dans <code>C:\nchp</code>.</li>
           <li><code>-RustDeskId 123456789</code> : ID RustDesk (détecté automatiquement si RustDesk est installé).</li>
-          <li><code>-DbUser ezmon</code> : compte MariaDB de supervision, sans droit sur les données. Le mot de passe est demandé.</li>
+          <li><code>-DbUser ezgedcc</code> : compte MariaDB de supervision, sans droit sur les données. Le mot de passe est demandé.</li>
           <li><code>-Reenroll</code> : force un nouvel enregistrement (crée une nouvelle fiche).</li>
         </ul>
         <p className="mt-3 text-xs text-muted">
-          Compte MariaDB conseillé : <code>CREATE USER 'ezmon'@'localhost' IDENTIFIED BY '…';</code> sans aucun GRANT. Il suffit pour lire les compteurs
+          Compte MariaDB conseillé : <code>CREATE USER 'ezgedcc'@'localhost' IDENTIFIED BY '…';</code> sans aucun GRANT. Il suffit pour lire les compteurs
           globaux (connexions, requêtes lentes).
         </p>
       </Card>

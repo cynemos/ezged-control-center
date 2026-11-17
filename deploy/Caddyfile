@@ -1,5 +1,5 @@
 # Certificat Let's Encrypt automatique pour le domaine de la console.
-{$EZMON_DOMAIN} {
+{$EZGEDCC_DOMAIN} {
 	encode gzip
 	header {
 		Strict-Transport-Security "max-age=31536000"

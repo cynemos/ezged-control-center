@@ -1,15 +1,15 @@
 #Requires -Version 5.1
 #Requires -RunAsAdministrator
 <#
-  Installe l'agent EzMon sur un serveur EzGED.
+  Installe l'agent EzGed ControlCenter sur un serveur EzGED.
 
   Exemple :
-    powershell -ExecutionPolicy Bypass -File install-agent.ps1 -ServerUrl https://ezmon.mondomaine.fr -EnrollKey XXXX
+    powershell -ExecutionPolicy Bypass -File install-agent.ps1 -ServerUrl https://ezged-cc.mondomaine.fr -EnrollKey XXXX
 
   Optionnel :
     -NchpRoot C:\nchp           racine EzGED si differente
     -RustDeskId 123456789       identifiant RustDesk (detecte automatiquement si RustDesk est installe)
-    -DbUser ezmon               compte MariaDB de supervision (le mot de passe est demande)
+    -DbUser ezgedcc               compte MariaDB de supervision (le mot de passe est demande)
     -Reenroll                   force un nouvel enregistrement (nouveau serveur dans la console)
 #>
 param(
@@ -22,10 +22,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$TaskName = 'EzMon Agent'
-$Dir = Join-Path $env:ProgramData 'EzMon'
+$TaskName = 'EzGed ControlCenter Agent'
+$Dir = Join-Path $env:ProgramData 'EzGedControlCenter'
 $ConfigPath = Join-Path $Dir 'config.json'
-$AgentPath = Join-Path $Dir 'ezmon-agent.ps1'
+$AgentPath = Join-Path $Dir 'ezged-cc-agent.ps1'
 
 Add-Type -AssemblyName System.Security
 function Protect-Secret([string]$Value) {
@@ -41,7 +41,7 @@ if (-not $ServerUrl.StartsWith('https://')) {
 # 1. Dossier reserve a SYSTEM et aux administrateurs
 New-Item -ItemType Directory -Path $Dir -Force | Out-Null
 & icacls $Dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
-Copy-Item -Path (Join-Path $PSScriptRoot 'ezmon-agent.ps1') -Destination $AgentPath -Force
+Copy-Item -Path (Join-Path $PSScriptRoot 'ezged-cc-agent.ps1') -Destination $AgentPath -Force
 
 # 2. Identifiant RustDesk
 if (-not $RustDeskId) {

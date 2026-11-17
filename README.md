@@ -1,9 +1,9 @@
-# EzMon – supervision du parc EzGED
+# EzGed ControlCenter – supervision du parc EzGED
 
 Console web pour suivre l'état, les performances et les versions des serveurs EzGED installés chez les clients.
 
 ```
-[Serveur EzGED client] --HTTPS sortant--> [Console EzMon (VPS)] <--- navigateur
+[Serveur EzGED client] --HTTPS sortant--> [Console EzGed ControlCenter (VPS)] <--- navigateur
   agent PowerShell                         API Node/TS + PostgreSQL
   (tâche planifiée, 1/min)                 interface React, alertes
 ```
@@ -14,7 +14,7 @@ L'agent se connecte uniquement **en sortie** (HTTPS). Aucun port à ouvrir chez 
 
 | Dossier | Rôle |
 |---|---|
-| `agent/` | `ezmon-agent.ps1` (collecte), `install-agent.ps1`, `uninstall-agent.ps1` |
+| `agent/` | `ezged-cc-agent.ps1` (collecte), `install-agent.ps1`, `uninstall-agent.ps1` |
 | `server/` | API Fastify + TypeScript, moteur d'alertes, notifications |
 | `web/` | Interface React (parc, fiche serveur, versions, alertes, ajout de serveur) |
 | `deploy/`, `Dockerfile`, `docker-compose.yml` | Déploiement VPS avec PostgreSQL et Caddy (HTTPS automatique) |
@@ -72,13 +72,13 @@ npm run dev                    # interface sur http://localhost:5173
 Tester l'agent sans rien envoyer :
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File agent\ezmon-agent.ps1 -ConfigPath C:\chemin\config.json -DryRun -ForceInventory
+powershell -ExecutionPolicy Bypass -File agent\ezged-cc-agent.ps1 -ConfigPath C:\chemin\config.json -DryRun -ForceInventory
 ```
 
 ## Production
 
 1. VPS Linux avec Docker, nom de domaine pointant dessus, ports 80/443 ouverts.
-2. `cp .env.example .env` puis remplir les secrets et `EZMON_DOMAIN`.
+2. `cp .env.example .env` puis remplir les secrets et `EZGEDCC_DOMAIN`.
 3. `docker compose up -d --build`.
 4. Double authentification : `docker compose exec app node dist/tools/totp-new.js`, coller le secret dans `ADMIN_TOTP_SECRET`, puis `docker compose up -d`.
 
@@ -87,15 +87,15 @@ powershell -ExecutionPolicy Bypass -File agent\ezmon-agent.ps1 -ConfigPath C:\ch
 Depuis la page **Ajouter un serveur** de la console : copier le dossier `agent\` sur le serveur, puis en PowerShell administrateur :
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install-agent.ps1 -ServerUrl https://ezmon.mondomaine.fr -EnrollKey <clé>
+powershell -ExecutionPolicy Bypass -File .\install-agent.ps1 -ServerUrl https://ezged-cc.mondomaine.fr -EnrollKey <clé>
 ```
 
-L'installeur crée `C:\ProgramData\EzMon` (accès SYSTEM et administrateurs uniquement), chiffre le jeton avec DPAPI et crée la tâche planifiée `EzMon Agent`.
+L'installeur crée `C:\ProgramData\EzGedControlCenter` (accès SYSTEM et administrateurs uniquement), chiffre le jeton avec DPAPI et crée la tâche planifiée `EzGed ControlCenter Agent`.
 
 Compte MariaDB de supervision conseillé, sans aucun droit sur les données :
 
 ```sql
-CREATE USER 'ezmon'@'localhost' IDENTIFIED BY '...';
+CREATE USER 'ezgedcc'@'localhost' IDENTIFIED BY '...';
 ```
 
 ## Feuille de route

@@ -1,4 +1,4 @@
-// Format du rapport envoyé par l'agent PowerShell (voir agent/ezmon-agent.ps1).
+// Format du rapport envoyé par l'agent PowerShell (voir agent/ezged-cc-agent.ps1).
 // Tous les champs sont optionnels : un agent plus ancien ou un serveur atypique peut en omettre.
 
 export interface DiskInfo {

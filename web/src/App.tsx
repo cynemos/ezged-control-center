@@ -31,8 +31,8 @@ export default function App() {
       .then(() => setAuth('in'))
       .catch(() => setAuth('out'));
     const onUnauth = () => setAuth('out');
-    window.addEventListener('ezmon:unauthorized', onUnauth);
-    return () => window.removeEventListener('ezmon:unauthorized', onUnauth);
+    window.addEventListener('ezgedcc:unauthorized', onUnauth);
+    return () => window.removeEventListener('ezgedcc:unauthorized', onUnauth);
   }, []);
 
   if (auth === 'unknown') return null;
@@ -48,7 +48,7 @@ export default function App() {
       <header className="sticky top-0 z-10 border-b border-line bg-bg/95 backdrop-blur">
         <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <span className="text-base font-semibold tracking-tight">
-            Ez<span className="text-accent">Mon</span>
+            EzGed <span className="text-accent">ControlCenter</span>
           </span>
           <nav className="flex flex-wrap gap-1">
             {NAV.map(([to, label]) => (

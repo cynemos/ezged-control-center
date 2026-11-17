@@ -34,8 +34,8 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     <div className="flex min-h-screen items-center justify-center px-4">
       <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-lg border border-line bg-panel p-6">
         <h1 className="text-lg font-semibold">
-          Ez<span className="text-accent">Mon</span>
-          <span className="ml-2 text-sm font-normal text-muted">supervision du parc EzGED</span>
+          EzGed <span className="text-accent">ControlCenter</span>
+          <span className="mt-0.5 block text-sm font-normal text-muted">Supervision du parc EzGED</span>
         </h1>
         <label className="block space-y-1">
           <span className="text-sm text-muted">Utilisateur</span>

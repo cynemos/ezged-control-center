@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.js';
 
-export const SESSION_COOKIE = 'ezmon_session';
+export const SESSION_COOKIE = 'ezgedcc_session';
 
 export function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
