@@ -62,12 +62,16 @@ if ($existing -and $existing.tokenProtected -and -not $Reenroll) {
   $serverId = $existing.serverId
   $tokenProtected = $existing.tokenProtected
 } else {
-  $body = @{ enrollKey = $EnrollKey; hostname = $env:COMPUTERNAME; rustdeskId = $RustDeskId } | ConvertTo-Json
+  # MachineGuid : identifie la machine pour que la console reutilise sa fiche en cas de reinstallation
+  $machineId = $null
+  try { $machineId = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid).MachineGuid } catch { }
+  $body = @{ enrollKey = $EnrollKey; hostname = $env:COMPUTERNAME; rustdeskId = $RustDeskId; machineId = $machineId } | ConvertTo-Json
   $resp = Invoke-RestMethod -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/agent/enroll') `
     -ContentType 'application/json' -Body $body -TimeoutSec 30 -UseBasicParsing
   $serverId = $resp.serverId
   $tokenProtected = Protect-Secret $resp.token
-  Write-Host "Serveur enregistre : $serverId"
+  if ($resp.reused) { Write-Host "Serveur deja connu de la console, fiche conservee : $serverId" }
+  else { Write-Host "Serveur enregistre : $serverId" }
 }
 
 # 4. Configuration (jeton et mot de passe chiffres DPAPI, lisibles uniquement sur cette machine)

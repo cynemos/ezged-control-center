@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.1.0'
+$AgentVersion = '0.1.1'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -319,6 +319,7 @@ function Get-Inventory {
 $report = [ordered]@{
   agentVersion  = $AgentVersion
   hostname      = $env:COMPUTERNAME
+  machineId     = Invoke-Safe 'machineId' { (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid).MachineGuid }
   collectedAt   = ConvertTo-IsoDate (Get-Date)
   metrics       = Invoke-Safe 'metrics' { Get-Metrics }
   services      = @(Invoke-Safe 'services' { Get-ServiceStates } @())

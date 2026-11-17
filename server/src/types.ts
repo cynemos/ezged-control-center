@@ -30,6 +30,7 @@ export interface HttpCheck {
 export interface Snapshot {
   agentVersion?: string;
   hostname?: string;
+  machineId?: string;
   collectedAt?: string;
   metrics?: {
     cpu?: number;

@@ -36,25 +36,42 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
   }
 
   // Enregistrement : l'installeur échange la clé d'enrôlement contre un jeton propre au serveur.
-  app.post<{ Body: { enrollKey?: string; hostname?: string; rustdeskId?: string } }>(
+  // Si la machine est déjà connue (même MachineGuid), sa fiche et son historique sont conservés
+  // et seul le jeton est renouvelé : l'ancien jeton cesse de fonctionner.
+  app.post<{ Body: { enrollKey?: string; hostname?: string; rustdeskId?: string; machineId?: string } }>(
     '/api/agent/enroll',
     { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
     async (req, reply) => {
-      const { enrollKey = '', hostname = '', rustdeskId } = req.body ?? {};
+      const { enrollKey = '', hostname = '', rustdeskId, machineId } = req.body ?? {};
       if (!safeEqual(enrollKey, config.enrollKey)) return reply.code(403).send({ error: "Clé d'enrôlement invalide" });
       const name = String(hostname).trim().slice(0, 100);
       if (!name) return reply.code(400).send({ error: 'hostname manquant' });
+      const machine = machineId ? String(machineId).trim().toLowerCase().slice(0, 64) || null : null;
+      const rustdesk = rustdeskId ? String(rustdeskId).slice(0, 50) : null;
+
+      const token = newToken();
+      if (machine) {
+        const [known] = await db.query<{ id: string }>(
+          `UPDATE servers SET token_hash = $2, hostname = $3, rustdesk_id = COALESCE($4, rustdesk_id)
+            WHERE machine_id = $1 RETURNING id`,
+          [machine, sha256(token), name, rustdesk],
+        );
+        if (known) {
+          req.log.info({ id: known.id, hostname: name }, 'Agent réenrôlé, fiche existante conservée');
+          return { serverId: known.id, token, reused: true };
+        }
+      }
 
       const id = randomUUID();
-      const token = newToken();
-      await db.query('INSERT INTO servers (id, hostname, token_hash, rustdesk_id) VALUES ($1, $2, $3, $4)', [
+      await db.query('INSERT INTO servers (id, hostname, token_hash, rustdesk_id, machine_id) VALUES ($1, $2, $3, $4, $5)', [
         id,
         name,
         sha256(token),
-        rustdeskId ? String(rustdeskId).slice(0, 50) : null,
+        rustdesk,
+        machine,
       ]);
       req.log.info({ id, hostname: name }, 'Agent enrôlé');
-      return { serverId: id, token };
+      return { serverId: id, token, reused: false };
     },
   );
 
@@ -73,6 +90,17 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
         WHERE id = $1`,
       [server.id, req.ip, snapshot.agentVersion ?? null, snapshot.hostname ?? null, JSON.stringify(snapshot)],
     );
+
+    // Serveurs enrôlés avant l'ajout de machine_id : renseigné au premier rapport qui le fournit,
+    // sauf si une autre fiche porte déjà cet identifiant.
+    const machine = snapshot.machineId ? String(snapshot.machineId).trim().toLowerCase().slice(0, 64) : '';
+    if (machine) {
+      await db.query(
+        `UPDATE servers SET machine_id = $2 WHERE id = $1 AND machine_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM servers WHERE machine_id = $2)`,
+        [server.id, machine],
+      );
+    }
 
     if (inventory) {
       const before = versionMap(server.inventory);

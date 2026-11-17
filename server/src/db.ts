@@ -62,6 +62,10 @@ CREATE TABLE IF NOT EXISTS version_history (
   new_version TEXT,
   changed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Identifiant Windows de la machine (MachineGuid) : un réenrôlement réutilise la même fiche.
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS machine_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS servers_machine_id ON servers (machine_id) WHERE machine_id IS NOT NULL;
 `;
 
 export async function openDb(): Promise<Db> {
