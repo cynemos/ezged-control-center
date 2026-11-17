@@ -123,6 +123,7 @@ export default function Server() {
               ['MariaDB', s.versions.mariadb],
               ['Dépôt EzGED', inv.ezged?.repository],
               ['Base', inv.ezged ? `${inv.ezged.database ?? '?'} · ${inv.ezged.dbSizeMB ?? '?'} Mo` : null],
+              ['Documents', docsLabel(inv.ezged?.docs)],
             ]}
           />
         </Card>
@@ -288,6 +289,15 @@ function Chart({ title, points, series, range, max }: { title: string; points: P
       )}
     </div>
   );
+}
+
+// Stockage des documents : taille, nombre de fichiers, date du calcul (quotidien côté agent).
+function docsLabel(d: any): string | null {
+  if (!d) return null;
+  if (d.found === false) return `introuvable (${d.dir})`;
+  const size = d.sizeGB >= 1 ? `${d.sizeGB.toLocaleString('fr-FR')} Go` : `${Math.round(d.sizeGB * 1024)} Mo`;
+  const files = `${Number(d.files).toLocaleString('fr-FR')} fichiers`;
+  return `${d.partial ? '≥ ' : ''}${size} · ${files} · ${ago(d.at)}`;
 }
 
 // Confirmation dans la page (pas de confirm() natif, que certains navigateurs bloquent).

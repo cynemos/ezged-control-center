@@ -61,7 +61,15 @@ export interface Snapshot {
 export interface Inventory {
   os?: { caption?: string; version?: string; build?: string; installDate?: string };
   versions?: { ezged?: string; apache?: string; php?: string; mariadb?: string };
-  ezged?: { root?: string; port?: string; repository?: string; database?: string; dbSizeMB?: number | null };
+  ezged?: {
+    root?: string;
+    port?: string;
+    repository?: string;
+    database?: string;
+    dbSizeMB?: number | null;
+    // Stockage des documents ([dirs] stockagesdir) ; partial = parcours interrompu après 90 s.
+    docs?: { dir?: string; found?: boolean; sizeGB?: number; files?: number; partial?: boolean; at?: string } | null;
+  };
   windowsUpdates?: { pending?: number | null; lastInstalledAt?: string | null; error?: string };
   certificates?: { file: string; subject: string; notAfter: string; daysLeft: number }[];
   hardware?: { model?: string; cpuName?: string; cores?: number };

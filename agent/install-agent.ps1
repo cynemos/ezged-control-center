@@ -7,7 +7,8 @@
     powershell -ExecutionPolicy Bypass -File install-agent.ps1 -ServerUrl https://ezged-cc.mondomaine.fr -EnrollKey XXXX
 
   Optionnel :
-    -NchpRoot C:\nchp           racine EzGED si differente
+    -NchpRoot D:\nchp           racine EzGED (sinon detectee : X:\nchp sur les disques locaux)
+    -BackupDir E:\sauvegardes   dossier des dumps (sinon recherche : nchp\save_dump(s), nchpdata\..., X:\dumps)
     -RustDeskId 123456789       identifiant RustDesk (detecte automatiquement si RustDesk est installe)
     -DbUser ezgedcc               compte MariaDB de supervision (le mot de passe est demande)
     -Reenroll                   force un nouvel enregistrement (nouveau serveur dans la console)
@@ -15,7 +16,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$ServerUrl,
   [Parameter(Mandatory = $true)][string]$EnrollKey,
-  [string]$NchpRoot = 'C:\nchp',
+  [string]$NchpRoot,
+  [string]$BackupDir,
   [string]$RustDeskId,
   [string]$DbUser,
   [switch]$Reenroll
@@ -79,8 +81,11 @@ $config = [ordered]@{
   serverUrl      = $ServerUrl.TrimEnd('/')
   serverId       = $serverId
   tokenProtected = $tokenProtected
-  nchpRoot       = $NchpRoot
 }
+# Sans -NchpRoot, l'agent cherche lui-meme X:\nchp sur les disques locaux.
+if ($NchpRoot) { $config.nchpRoot = $NchpRoot }
+# Dossier des dumps s'il n'est pas dans un emplacement connu (save_dump(s), nchpdata, X:\dumps).
+if ($BackupDir) { $config.backupDir = $BackupDir }
 if ($DbUser) {
   $dbPwd = Read-Host "Mot de passe MariaDB pour $DbUser" -AsSecureString
   $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($dbPwd))

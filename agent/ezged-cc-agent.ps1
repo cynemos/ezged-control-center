@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.1.1'
+$AgentVersion = '0.1.2'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -50,12 +50,27 @@ function Unprotect-Secret([string]$Value) {
 
 # ---------------------------------------------------------------- configuration
 $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json
-$Root = if ($cfg.nchpRoot) { $cfg.nchpRoot } else { 'C:\nchp' }
+# Disques locaux, pour chercher l'installation et les dumps hors de C: (ex. D:\nchp, D:\dumps).
+$FixedDrives = @(Invoke-Safe 'drives' { Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { $_.DeviceID } } @('C:'))
+$Root = $cfg.nchpRoot
+if (-not $Root) {
+  $Root = $FixedDrives | ForEach-Object { "$_\nchp" } |
+    Where-Object { Test-Path (Join-Path $_ 'etc\nchp\ezged\instance.conf') } | Select-Object -First 1
+  if (-not $Root) { $Root = 'C:\nchp' }
+}
 $Services = if ($cfg.services) { @($cfg.services) } else { @('Apache2.4', 'EzGED', 'MySQL') }
 # URL publique EzGED via Apache (optionnelle) : doit repondre 2xx/3xx/401/403.
 $WebUrl = $cfg.httpUrl
-$BackupDir = if ($cfg.backupDir) { $cfg.backupDir } else { Join-Path $Root 'save_dump' }
-$SpoolDir = if ($cfg.spoolDir) { $cfg.spoolDir } else { Join-Path $Root 'var\spool\ezged\instance' }
+# Dossiers de dumps : backupDir impose par la configuration, sinon recherche (voir Get-BackupState).
+$BackupDirs = if ($cfg.backupDir) { @($cfg.backupDir) } else {
+  @(Join-Path $Root 'save_dump'; Join-Path $Root 'save_dumps') + @($FixedDrives | ForEach-Object {
+      # Chemin de destination du job EzGED "Sauvegarde de BDD" : souvent C:\save_dumps ou D:\dumps.
+      "$_\nchp\save_dump"; "$_\nchp\save_dumps"; "$_\nchpdata\save_dump"; "$_\nchpdata\save_dumps"; "$_\nchpdata\dumps"
+      "$_\save_dump"; "$_\save_dumps"; "$_\dumps"
+    }) | Select-Object -Unique
+}
+# Files de traitement : spoolDir impose, sinon [dirs] spooldir de instance.conf, sinon chemin standard.
+$SpoolDir = $cfg.spoolDir
 $Queues = if ($cfg.queues) { @($cfg.queues) } else { @('enqueued', 'wait', 'ocr', 'convd', 'pdf2txt', 'ps2pdf') }
 $ApacheRoot = Join-Path $Root 'Apache24'
 $EzgedConf = Join-Path $Root 'etc\nchp\ezged\instance.conf'
@@ -63,7 +78,11 @@ $EzgedConf = Join-Path $Root 'etc\nchp\ezged\instance.conf'
 $state = @{ lastInventory = $null; inventoryIntervalMin = 60 }
 if (Test-Path $StateFile) {
   $s = Invoke-Safe 'state' { Get-Content $StateFile -Raw | ConvertFrom-Json }
-  if ($s) { $state.lastInventory = $s.lastInventory; if ($s.inventoryIntervalMin) { $state.inventoryIntervalMin = $s.inventoryIntervalMin } }
+  if ($s) {
+    $state.lastInventory = $s.lastInventory
+    if ($s.inventoryIntervalMin) { $state.inventoryIntervalMin = $s.inventoryIntervalMin }
+    if ($s.docs) { $state.docs = $s.docs }
+  }
 }
 
 # ---------------------------------------------------------------- collecte rapide (chaque minute)
@@ -127,22 +146,44 @@ function Test-Http([string]$Url, [switch]$Strict) {
   }
 }
 
+# Dump le plus recent parmi les dossiers candidats (dump_*.zip d'EzGED ou export SQL).
 function Get-BackupState {
   $last = $null
-  if (Test-Path $BackupDir) {
-    $last = Get-ChildItem -Path $BackupDir -Filter 'dump_*.zip' -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  $existing = @($BackupDirs | Where-Object { Test-Path $_ -PathType Container })
+  foreach ($d in $existing) {
+    # Fichier dump (zip, sql...) ou, job en singlefile = 0, dossier dump_* contenant un fichier par table.
+    $f = Get-ChildItem -Path $d -ErrorAction SilentlyContinue |
+      Where-Object {
+        ($_.PSIsContainer -and $_.Name -match '^dump') -or
+        (-not $_.PSIsContainer -and ($_.Name -match '^dump.*\.(zip|7z|gz|sql)$' -or $_.Name -match '\.sql(\.(gz|zip|7z))?$'))
+      } |
+      Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($f -and (-not $last -or $f.LastWriteTime -gt $last.LastWriteTime)) { $last = $f }
   }
+  $size = $null
+  if ($last -and $last.PSIsContainer) {
+    $size = [long](Get-ChildItem -Path $last.FullName -File -Recurse -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+    $dir = $last.Parent.FullName
+  } elseif ($last) {
+    $size = $last.Length
+    $dir = $last.DirectoryName
+  } elseif ($existing.Count) { $dir = $existing -join ', ' }
+  else { $dir = ($BackupDirs | Select-Object -First 2) -join ', ' }
   return [ordered]@{
-    dir       = $BackupDir
+    dir       = $dir
     lastFile  = if ($last) { $last.Name } else { $null }
     lastAt    = if ($last) { ConvertTo-IsoDate $last.LastWriteTime } else { $null }
-    sizeBytes = if ($last) { $last.Length } else { $null }
+    sizeBytes = $size
     ageHours  = if ($last) { [math]::Round(((Get-Date) - $last.LastWriteTime).TotalHours, 1) } else { $null }
   }
 }
 
 function Get-QueueStates {
   $result = [ordered]@{}
+  if (-not $SpoolDir) {
+    $script:SpoolDir = (Read-IniKeys $EzgedConf @{ 'dirs.spooldir' = 'spool' }).spool
+    if (-not $SpoolDir -or -not (Test-Path $SpoolDir)) { $script:SpoolDir = Join-Path $Root 'var\spool\ezged\instance' }
+  }
   foreach ($q in $Queues) {
     $dir = Join-Path $SpoolDir $q
     if (-not (Test-Path $dir)) { continue }
@@ -201,6 +242,36 @@ function Get-ExeVersion([string]$Exe, [string[]]$ExeArgs, [string]$Pattern) {
   $out = (& $Exe @ExeArgs 2>&1 | Out-String)
   if ($out -match $Pattern) { return $Matches[1] }
   return $null
+}
+
+# Taille du stockage des documents ([dirs] stockagesdir, ex. C:\nchp\var\nchp\instance).
+# Parcours couteux (millions de fichiers possibles) : au plus une fois par 24 h, limite a 90 s,
+# resultat garde dans state.json entre deux calculs.
+function Get-DocStorage {
+  $dir = (Read-IniKeys $EzgedConf @{ 'dirs.stockagesdir' = 'dir' }).dir
+  if (-not $dir) { $dir = Join-Path $Root 'var\nchp\instance' }
+  $prev = $state.docs
+  if (-not $ForceInventory -and $prev -and $prev.dir -eq $dir -and $prev.at -and
+    ((Get-Date) - [datetime]$prev.at).TotalHours -lt 24) { return $prev }
+  if (-not (Test-Path $dir -PathType Container)) { return [ordered]@{ dir = $dir; found = $false } }
+
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  $bytes = [long]0; $count = [long]0; $partial = $false
+  foreach ($f in ([IO.DirectoryInfo]$dir).EnumerateFiles('*', [IO.SearchOption]::AllDirectories)) {
+    $bytes += $f.Length; $count++
+    if (($count % 2000) -eq 0 -and $sw.Elapsed.TotalSeconds -gt 90) { $partial = $true; break }
+  }
+  $result = [ordered]@{
+    dir     = $dir
+    found   = $true
+    sizeGB  = [math]::Round($bytes / 1GB, 2)
+    files   = $count
+    partial = $partial
+    seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+    at      = (Get-Date).ToString('o')
+  }
+  $state.docs = $result
+  return $result
 }
 
 # Lit uniquement les cles demandees d'un fichier INI (jamais les mots de passe).
@@ -285,6 +356,8 @@ function Get-Inventory {
     }
   }
 
+  $docs = Invoke-Safe 'docs' { Get-DocStorage }
+
   return [ordered]@{
     os             = [ordered]@{
       caption     = $os.Caption
@@ -304,6 +377,7 @@ function Get-Inventory {
       repository = $ezConf.repository
       database   = $ezConf.database
       dbSizeMB   = $dbSizeMB
+      docs       = $docs
     }
     windowsUpdates = Get-WindowsUpdateState
     certificates   = @(Invoke-Safe 'certificates' { Get-ApacheCertificates } @())
