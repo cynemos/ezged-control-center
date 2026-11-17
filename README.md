@@ -94,6 +94,8 @@ Le script installe un Node.js portable (empreinte vérifiée) dans `C:\EzGedCont
 
 Options : `-Port`, `-BasePath`, `-InstallDir`, `-NodeVersion`, `-SkipFunnel`.
 
+Depuis le serveur lui-même, l'adresse `ts.net` pointe sur sa propre IP Tailscale : si un autre logiciel écoute sur le port 443 (PaperCut sur SRV-PAPERCUT), c'est lui qui répond (404 Jetty). Sur le serveur, utiliser `http://localhost:8797/ezgedcc/` ; ailleurs, l'adresse publique.
+
 La variable `BASE_PATH` permet de servir la console sous n'importe quel préfixe ; l'interface et l'API s'adaptent toutes seules.
 
 ## Installer l'agent sur un serveur

@@ -213,7 +213,14 @@ if (-not $SkipFunnel) {
     try { $remoteOk = (Invoke-WebRequest -Uri "$publicUrl/api/auth-info" -UseBasicParsing -TimeoutSec 10).StatusCode -eq 200 } catch { Start-Sleep -Seconds 3 }
   }
   if ($remoteOk) { Write-Host "Console joignable : $publicUrl" -ForegroundColor Green }
-  else { Write-Warning "Pas encore de reponse sur $publicUrl (le certificat peut prendre une minute). Reessayez dans un navigateur." }
+  else {
+    # Depuis le serveur lui-meme, le nom Tailscale pointe sur sa propre IP : un autre logiciel ecoutant
+    # sur le port 443 (ex. PaperCut) repond a la place de Tailscale. Tester depuis un autre poste.
+    $p443 = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    $who = if ($p443) { (Get-Process -Id $p443.OwningProcess -ErrorAction SilentlyContinue).ProcessName } else { $null }
+    if ($who) { Write-Warning "Test impossible depuis ce serveur : '$who' ecoute deja sur le port 443 local. Ouvrez $publicUrl/ depuis un autre poste." }
+    else { Write-Warning "Pas encore de reponse sur $publicUrl (le certificat peut prendre une minute). Reessayez depuis un autre poste." }
+  }
 }
 
 # ------------------------------------------------------------ 9. Recapitulatif
