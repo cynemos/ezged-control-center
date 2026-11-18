@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.2.1'
+$AgentVersion = '0.2.2'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -630,12 +630,16 @@ function Update-Agent($Offer, [string]$Token) {
   Write-Log "Agent mis a jour : $AgentVersion -> $($Offer.version)"
 }
 
+# -UseBasicParsing n'existe pas sur Invoke-RestMethod en PowerShell 3.0 (inutile pour du JSON).
+$Basic = @{}
+if ((Get-Command Invoke-RestMethod).Parameters.ContainsKey('UseBasicParsing')) { $Basic.UseBasicParsing = $true }
+
 try {
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   $token = Unprotect-Secret $cfg.tokenProtected
   $resp = Invoke-RestMethod -Method Post -Uri ($cfg.serverUrl.TrimEnd('/') + '/api/agent/report') `
     -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json; charset=utf-8' `
-    -Body ([Text.Encoding]::UTF8.GetBytes($json)) -TimeoutSec 30 -UseBasicParsing
+    -Body ([Text.Encoding]::UTF8.GetBytes($json)) -TimeoutSec 30 @Basic
   if ($inventoryDue -and $report.inventory) { $state.lastInventory = (Get-Date).ToString('o') }
   if ($resp.inventoryIntervalMin) { $state.inventoryIntervalMin = [int]$resp.inventoryIntervalMin }
   $state | ConvertTo-Json -Depth 10 | Set-Content -Path $StateFile -Encoding UTF8

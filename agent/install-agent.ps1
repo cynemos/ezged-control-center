@@ -77,8 +77,8 @@ if (-not $SkipTlsFix) {
     if (Set-RegDword $p 'SchUseStrongCrypto' 1) { $tlsChanged = $true }
     if (Set-RegDword $p 'SystemDefaultTlsVersions' 1) { $tlsChanged = $true }
   }
-  if ([int]$os.BuildNumber -lt 9600) {
-    # 2008 R2 / 2012 : TLS 1.2 client desactive par defaut dans SChannel.
+  if ([int]$os.BuildNumber -lt 9200) {
+    # 2008 R2 : TLS 1.2 client desactive par defaut dans SChannel (actif d'origine a partir de 2012).
     $sc = 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\Client'
     if (Set-RegDword $sc 'Enabled' 1) { $tlsChanged = $true }
     if (Set-RegDword $sc 'DisabledByDefault' 0) { $tlsChanged = $true }
@@ -91,15 +91,19 @@ if (-not $ServerUrl.StartsWith('https://')) {
 }
 $ServerUrl = $ServerUrl.TrimEnd('/')
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# -UseBasicParsing n'existe pas sur Invoke-RestMethod en PowerShell 3.0 (inutile pour du JSON).
+$Basic = @{}
+if ((Get-Command Invoke-RestMethod).Parameters.ContainsKey('UseBasicParsing')) { $Basic.UseBasicParsing = $true }
 
 # Test de connexion avant toute modification de la machine.
 try {
-  Invoke-RestMethod -Uri "$ServerUrl/api/auth-info" -TimeoutSec 20 -UseBasicParsing | Out-Null
+  Invoke-RestMethod -Uri "$ServerUrl/api/auth-info" -TimeoutSec 20 @Basic | Out-Null
   Write-Host "Console    : joignable ($ServerUrl)"
 } catch {
   $msg = $_.Exception.Message
-  $hint = if ($tlsChanged -and [int]$os.BuildNumber -lt 9600) { ' Le registre TLS vient d''etre modifie : redemarrer le serveur puis relancer ce script.' }
-          elseif ($msg -match 'SSL|TLS|canal|secure channel') { ' Probleme TLS : verifier que les mises a jour Windows sont installees (KB3140245 sur 2008 R2).' }
+  $isTls = $msg -match 'SSL|TLS|canal|secure channel|connexion sous-jacente|underlying connection'
+  $hint = if ($isTls -and $tlsChanged) { ' Le registre TLS vient d''etre modifie : redemarrer le serveur puis relancer ce script.' }
+          elseif ($isTls) { ' Probleme TLS : verifier que les mises a jour Windows sont installees (KB3140245 sur 2008 R2).' }
           else { ' Verifier l''adresse, le DNS et le pare-feu sortant (HTTPS 443).' }
   Stop-Install "console injoignable : $msg.$hint"
 }
@@ -145,7 +149,7 @@ if ($existing -and $existing.tokenProtected -and -not $Reenroll) {
   try { $machineId = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid).MachineGuid } catch { }
   $body = @{ enrollKey = $EnrollKey; hostname = $env:COMPUTERNAME; rustdeskId = $RustDeskId; machineId = $machineId } | ConvertTo-Json
   $resp = Invoke-RestMethod -Method Post -Uri "$ServerUrl/api/agent/enroll" `
-    -ContentType 'application/json' -Body $body -TimeoutSec 30 -UseBasicParsing
+    -ContentType 'application/json' -Body $body -TimeoutSec 30 @Basic
   $serverId = $resp.serverId
   $tokenProtected = Protect-Secret $resp.token
   if ($resp.reused) { Write-Host "Serveur deja connu de la console, fiche conservee : $serverId" }
