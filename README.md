@@ -104,6 +104,24 @@ Le script installe un Node.js portable (empreinte vérifiée) dans `C:\EzGedCont
 
 Options : `-Port`, `-BasePath`, `-InstallDir`, `-NodeVersion`, `-SkipFunnel`.
 
+### Mises à jour de la console
+
+Chaque tag `v*` poussé sur GitHub déclenche le workflow `.github/workflows/console-package.yml`. Il construit le paquet et le publie en release avec son empreinte SHA256. Sur le serveur, en PowerShell administrateur :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\EzGedControlCenter\update-console.ps1
+```
+
+Le script compare la version installée (`VERSION.txt`) à la dernière release, télécharge le paquet, vérifie son empreinte puis lance `install-console.ps1` (`.env` et données conservés). `-Tag v0.3.0` installe une version précise (retour arrière), `-DownloadOnly` vérifie sans installer, `-Force` réinstalle.
+
+Première fois, si `update-console.ps1` n'est pas encore dans `C:\EzGedControlCenter` :
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/cynemos/ezged-control-center/master/deploy/windows/update-console.ps1 -OutFile $env:TEMP\update-console.ps1 -UseBasicParsing; powershell -ExecutionPolicy Bypass -File $env:TEMP\update-console.ps1
+```
+
+Publier une version depuis le poste de développement : `git tag -a v0.3.1 -m v0.3.1` puis `git push origin v0.3.1`.
+
 Depuis le serveur lui-même, l'adresse `ts.net` pointe sur sa propre IP Tailscale : si un autre logiciel écoute sur le port 443 (PaperCut sur SRV-PAPERCUT), c'est lui qui répond (404 Jetty). Sur le serveur, utiliser `http://localhost:8797/ezgedcc/` ; ailleurs, l'adresse publique.
 
 La variable `BASE_PATH` permet de servir la console sous n'importe quel préfixe ; l'interface et l'API s'adaptent toutes seules.
