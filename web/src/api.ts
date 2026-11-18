@@ -56,6 +56,8 @@ export interface ServerSummary {
   health: HealthLight[];
   veeamAgeHours: number | null;
   uptimeHours: number | null;
+  /** Jours avant disque plein selon la tendance des 7 derniers jours (null : stable ou historique insuffisant). */
+  diskFullDays: number | null;
 }
 
 export type LightState = 'ok' | 'warning' | 'critical' | 'na';

@@ -9,6 +9,7 @@
   Optionnel :
     -NchpRoot D:\nchp           racine EzGED (sinon detectee : X:\nchp sur les disques locaux)
     -BackupDir E:\sauvegardes   dossier des dumps (sinon recherche : nchp\save_dump(s), nchpdata\..., X:\dumps)
+    -DocsDir E:\ged             stockage des documents s'il n'est pas le stockagesdir de instance.conf
     -RustDeskId 123456789       identifiant RustDesk (detecte automatiquement si RustDesk est installe)
     -DbUser ezgedcc             compte MariaDB de supervision (le mot de passe est demande)
     -Reenroll                   force un nouvel enregistrement (nouveau serveur dans la console)
@@ -20,6 +21,7 @@ param(
   [Parameter(Mandatory = $true)][string]$EnrollKey,
   [string]$NchpRoot,
   [string]$BackupDir,
+  [string]$DocsDir,
   [string]$RustDeskId,
   [string]$DbUser,
   [switch]$Reenroll,
@@ -166,6 +168,8 @@ $config = [ordered]@{
 if ($NchpRoot) { $config.nchpRoot = $NchpRoot } elseif ($existing -and $existing.nchpRoot) { $config.nchpRoot = $existing.nchpRoot }
 # Dossier des dumps s'il n'est pas dans un emplacement connu (save_dump(s), nchpdata, X:\dumps).
 if ($BackupDir) { $config.backupDir = $BackupDir } elseif ($existing -and $existing.backupDir) { $config.backupDir = $existing.backupDir }
+# Stockage des documents declare dans l'administration EzGED plutot que dans instance.conf.
+if ($DocsDir) { $config.docsDir = $DocsDir } elseif ($existing -and $existing.docsDir) { $config.docsDir = $existing.docsDir }
 if ($DbUser) {
   $dbPwd = Read-Host "Mot de passe MariaDB pour $DbUser" -AsSecureString
   $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($dbPwd))

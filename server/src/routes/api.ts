@@ -22,6 +22,7 @@ interface ServerRow {
   crit: number;
   warn: number;
   open_rules: { rule: string; severity: 'warning' | 'critical' }[] | null;
+  disk_full_days: number | null;
 }
 
 type Light = 'ok' | 'warning' | 'critical' | 'na';
@@ -30,8 +31,9 @@ type Light = 'ok' | 'warning' | 'critical' | 'na';
 // Ordre d'affichage = ordre de ce tableau.
 const HEALTH_GROUPS: { key: string; label: string; prefixes: string[] }[] = [
   { key: 'agent', label: 'Agent', prefixes: ['offline', 'agent:'] },
-  { key: 'system', label: 'Système', prefixes: ['cpu', 'mem', 'disk:'] },
-  { key: 'services', label: 'Services', prefixes: ['service:', 'restart:', 'db'] },
+  { key: 'system', label: 'Système', prefixes: ['cpu', 'mem', 'disk:', 'diskfull'] },
+  { key: 'hardware', label: 'Matériel', prefixes: ['event:', 'smart:'] },
+  { key: 'services', label: 'Services', prefixes: ['service:', 'restart:', 'db', 'log:'] },
   { key: 'web', label: 'Web', prefixes: ['http', 'web', 'apache:'] },
   { key: 'queues', label: 'Files', prefixes: ['queue:'] },
   { key: 'dump', label: 'Dump', prefixes: ['backup'] },
@@ -54,6 +56,7 @@ function health(r: ServerRow): { key: string; label: string; state: Light }[] {
       else if (g.key === 'veeam' && !r.snapshot?.veeam) state = 'na';
       else if (g.key === 'dump' && !r.snapshot?.backup) state = 'na';
       else if (g.key === 'certs' && !r.inventory?.certificates?.length) state = 'na';
+      else if (g.key === 'hardware' && !r.snapshot?.events) state = 'na';
     }
     return { key: g.key, label: g.label, state };
   });
@@ -61,7 +64,7 @@ function health(r: ServerRow): { key: string; label: string; state: Light }[] {
 
 const SERVER_SELECT = `
   SELECT s.id, s.hostname, s.display_name, s.client_id, c.name AS client_name, s.rustdesk_id, s.notes,
-         s.enrolled_at, s.last_seen, s.last_ip, s.agent_version, s.snapshot, s.inventory, s.inventory_at,
+         s.enrolled_at, s.last_seen, s.last_ip, s.agent_version, s.snapshot, s.inventory, s.inventory_at, s.disk_full_days,
          (SELECT count(*)::int FROM alerts a WHERE a.server_id = s.id AND a.closed_at IS NULL AND a.severity = 'critical') AS crit,
          (SELECT count(*)::int FROM alerts a WHERE a.server_id = s.id AND a.closed_at IS NULL AND a.severity = 'warning') AS warn,
          (SELECT json_agg(json_build_object('rule', a.rule, 'severity', a.severity)) FROM alerts a
@@ -106,6 +109,7 @@ function summary(r: ServerRow) {
     health: health(r),
     veeamAgeHours: r.snapshot?.veeam?.okAgeHours ?? null,
     uptimeHours: m.uptimeHours ?? null,
+    diskFullDays: r.disk_full_days === null ? null : Math.round(r.disk_full_days),
     rustdeskId: r.rustdesk_id,
     agentVersion: r.agent_version,
   };

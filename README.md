@@ -30,6 +30,8 @@ Chaque minute :
 - dernier dump dans `C:\nchp\save_dump` (âge, taille) ;
 - Veeam Agent for Windows s'il est installé : service, version, résultat de la dernière tâche et date de la dernière sauvegarde réussie (journal d'événements `Veeam Agent`) ;
 - toutes les 5 à 15 min (résultat gardé en cache et renvoyé entre deux calculs) : dernier dump, Veeam, redémarrage en attente, liste des ports Apache ;
+- toutes les 15 min : journal Système des dernières 24 h (écrans bleus, arrêts inattendus, erreurs disque et NTFS), erreurs des journaux Apache et MariaDB des dernières 24 h ;
+- toutes les heures : santé des disques physiques (prédiction de panne SMART, état Windows à partir de 2012 ; souvent invisible derrière un RAID ou dans une VM) ;
 - santé de l'agent : durée de collecte, collectes en échec, versions de PowerShell et .NET ;
 - files `enqueued`, `wait`, `ocr`, `convd`, `pdf2txt`, `ps2pdf` (nombre de fichiers, âge du plus ancien) ;
 - compteurs MariaDB si un compte de supervision est configuré.
@@ -56,6 +58,12 @@ L'agent **ne lit jamais** les mots de passe de `instance.conf` ni les clés de `
 | Veeam : dernière tâche en avertissement | alerte |
 | Veeam : dernière réussite > 74 h / > 98 h (marge pour le week-end) | alerte / critique |
 | Fichier en file depuis > 60 min | alerte |
+| Dump < 50 % du précédent (tronqué, base vidée) | alerte |
+| Disque plein dans < 30 j / < 7 j selon la tendance des 7 derniers jours | alerte / critique |
+| Écran bleu ou erreur disque dans le journal Système (24 h) | critique |
+| Arrêt inattendu ou erreur NTFS (24 h) | alerte |
+| Disque physique : panne prédite par SMART ou état « Unhealthy » | critique |
+| Erreur dans le journal MariaDB (24 h) | alerte |
 | Service redémarré depuis < 15 min (hors redémarrage du serveur) | alerte |
 | Agent : collecte en échec ou plus lente que 45 s | alerte |
 | RAM ≥ 95 %, CPU moyen ≥ 90 % sur 5 min | alerte |
@@ -128,7 +136,7 @@ La variable `BASE_PATH` permet de servir la console sous n'importe quel préfixe
 
 ## Vue du parc
 
-La page **Parc** affiche une tuile par serveur (ou un tableau, au choix) : bandeau de couleur selon l'état, CPU/RAM/disque, âge du dump et de la sauvegarde Veeam, version EzGED, et des voyants par catégorie (Agent, Système, Services, Web, Files, Dump, Veeam, SSL). Un voyant gris signifie « non surveillé sur ce serveur ». Le bouton **Plein écran** sert de mur de supervision ; la page se rafraîchit toute seule.
+La page **Parc** affiche une tuile par serveur (ou un tableau, au choix) : bandeau de couleur selon l'état, CPU/RAM/disque, âge du dump et de la sauvegarde Veeam, version EzGED, et des voyants par catégorie (Agent, Système, Matériel, Services, Web, Files, Dump, Veeam, SSL), et l'échéance « disque plein dans X j » si elle approche. Un voyant gris signifie « non surveillé sur ce serveur ». Le bouton **Plein écran** sert de mur de supervision ; la page se rafraîchit toute seule.
 
 ## Installer l'agent sur un serveur
 
@@ -141,6 +149,8 @@ powershell -ExecutionPolicy Bypass -File .\install-agent.ps1 -ServerUrl https://
 ```
 
 Mise à jour des agents : avec `AGENT_AUTO_UPDATE=1` dans le `.env` de la console, chaque agent plus ancien télécharge le script embarqué par la console, vérifie son empreinte SHA256 et sa syntaxe, puis se remplace ; la nouvelle version tourne à la minute suivante. Activer cette option donne à la console le pouvoir d'exécuter du code en SYSTEM sur tout le parc : la protéger en conséquence (mot de passe fort, double authentification). `-NoAutoUpdate` à l'installation refuse ces mises à jour sur un serveur.
+
+Si les documents ne sont pas dans le `stockagesdir` de `instance.conf` (stockage déclaré dans l'administration EzGED), passer `-DocsDir E:\ged` à l'installeur : relancé sur un serveur déjà enregistré, il garde son jeton.
 
 L'installeur crée `C:\ProgramData\EzGedControlCenter` (accès SYSTEM et administrateurs uniquement), chiffre le jeton avec DPAPI et crée la tâche planifiée `EzGed ControlCenter Agent`.
 

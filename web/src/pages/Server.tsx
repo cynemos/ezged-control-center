@@ -222,6 +222,66 @@ export default function Server() {
           />
         </Card>
 
+        <Card title="Matériel et journaux" right={<span className="text-xs text-muted">24 dernières heures</span>}>
+          {snap.events || snap.disksHealth || snap.logs ? (
+            <div className="space-y-3 text-sm">
+              {snap.events && (
+                <Kv
+                  rows={[
+                    ['Écrans bleus', <Count n={snap.events.bugchecks} crit />],
+                    ['Arrêts inattendus', <Count n={snap.events.shutdowns} />],
+                    ['Erreurs disque', <Count n={snap.events.diskErrors} crit />],
+                    ['Erreurs NTFS', <Count n={snap.events.ntfsErrors} />],
+                  ]}
+                />
+              )}
+              {snap.events?.last?.length > 0 && (
+                <ul className="space-y-1 border-t border-line pt-2 text-xs">
+                  {snap.events.last.map((e: any, i: number) => (
+                    <li key={i}>
+                      <span className="text-muted">{dateTime(e.at)} · {e.source} {e.id}</span> {e.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {(snap.disksHealth ?? []).length > 0 && (
+                <ul className="space-y-1 border-t border-line pt-2">
+                  {snap.disksHealth.map((d: any, i: number) => {
+                    const bad = d.predictFailure === true || /unhealthy/i.test(d.health ?? '');
+                    const warn = /warning/i.test(d.health ?? '') || (d.status && !/^ok$/i.test(d.status));
+                    return (
+                      <li key={i} className="flex items-center justify-between gap-2">
+                        <span className="truncate" title={d.model}>
+                          {d.model} <span className="text-xs text-muted">{d.sizeGB} Go</span>
+                        </span>
+                        <Pill tone={bad ? 'crit' : warn ? 'warn' : 'ok'}>
+                          {d.predictFailure === true ? 'panne prédite' : d.health ?? d.status}
+                          {d.predictFailure === null && d.health === null ? '' : d.predictFailure === false ? ' · SMART OK' : ''}
+                        </Pill>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {snap.logs && Object.keys(snap.logs).length > 0 && (
+                <div className="space-y-1 border-t border-line pt-2">
+                  {Object.entries(snap.logs).map(([name, l]: [string, any]) => (
+                    <div key={name}>
+                      <div className="flex justify-between">
+                        <span>Journal {name === 'mariadb' ? 'MariaDB' : 'Apache'}</span>
+                        <span className={l.errors ? (name === 'mariadb' ? 'text-warn' : '') : 'text-muted'}>{l.errors} erreur(s)</span>
+                      </div>
+                      {l.last && <div className="truncate text-xs text-muted" title={l.last}>{l.last}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted">Disponible à partir de l'agent 0.3.0.</p>
+          )}
+        </Card>
+
         <Card title="Disques">
           <ul className="space-y-1.5 text-sm">
             {(m.disks ?? []).map((d: any) => (
@@ -239,7 +299,13 @@ export default function Server() {
               ['Dernier dump', snap.backup?.lastFile],
               ['Date', dateTime(snap.backup?.lastAt)],
               ['Âge', <span className={snap.backup?.ageHours > 26 ? 'text-warn' : ''}>{hours(snap.backup?.ageHours)}</span>],
-              ['Taille', bytes(snap.backup?.sizeBytes)],
+              [
+                'Taille',
+                <span>
+                  {bytes(snap.backup?.sizeBytes)}
+                  {snap.backup?.prevSizeBytes ? <span className="text-xs text-muted"> · précédent {bytes(snap.backup.prevSizeBytes)}</span> : null}
+                </span>,
+              ],
               ['Dossier', snap.backup?.dir],
             ]}
           />
@@ -388,6 +454,11 @@ function Chart({ title, points, series, range, max }: { title: string; points: P
 }
 
 // Stockage des documents : taille, nombre de fichiers, date du calcul (quotidien côté agent).
+function Count({ n, crit = false }: { n: number; crit?: boolean }) {
+  if (!n) return <span className="text-muted">0</span>;
+  return <span className={crit ? 'font-medium text-crit' : 'font-medium text-warn'}>{n}</span>;
+}
+
 function dotnetLabel(release: number | null | undefined): string | null {
   if (!release) return null;
   const v = release >= 533320 ? '4.8.1' : release >= 528040 ? '4.8' : release >= 461808 ? '4.7.2' : release >= 460798 ? '4.7' : release >= 394802 ? '4.6.2' : release >= 393295 ? '4.6' : release >= 379893 ? '4.5.2' : '4.5';

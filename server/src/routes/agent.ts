@@ -41,6 +41,30 @@ async function agentScript() {
   return agentCache.version ? agentCache : null;
 }
 
+// Tendance de remplissage disque : pente de disk_max sur 7 jours (régression linéaire), recalculée
+// au plus tous les quarts d'heure par serveur. Il faut au moins 2 jours d'historique.
+const trendCache = new Map<string, { at: number; days: number | null }>();
+async function diskTrend(db: Db, serverId: string): Promise<number | null> {
+  const cached = trendCache.get(serverId);
+  if (cached && Date.now() - cached.at < 15 * 60_000) return cached.days;
+  const [r] = await db.query<{ slope: number | null; span_h: number | null; last: number | null }>(
+    `SELECT regr_slope(disk_max, extract(epoch FROM ts)) AS slope,
+            extract(epoch FROM max(ts) - min(ts)) / 3600 AS span_h,
+            (array_agg(disk_max ORDER BY ts DESC))[1] AS last
+       FROM metrics WHERE server_id = $1 AND ts > now() - interval '7 days' AND disk_max IS NOT NULL`,
+    [serverId],
+  );
+  let days: number | null = null;
+  const slope = r?.slope === null || r?.slope === undefined ? null : Number(r.slope); // points de % par seconde
+  if (slope !== null && slope > 0 && Number(r?.span_h ?? 0) >= 48 && r?.last !== null && r?.last !== undefined) {
+    days = (100 - Number(r.last)) / (slope * 86_400);
+    if (!Number.isFinite(days) || days > 3650) days = null;
+  }
+  trendCache.set(serverId, { at: Date.now(), days });
+  await db.query('UPDATE servers SET disk_full_days = $2 WHERE id = $1', [serverId, days]);
+  return days;
+}
+
 function clampPct(n: unknown): number | null {
   return typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null;
 }
@@ -153,7 +177,8 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
     );
     const recentCpu = cpuRows.map((r) => r.cpu).filter((c): c is number => c !== null);
     const [inv] = await db.query<{ inventory: Inventory | null }>('SELECT inventory FROM servers WHERE id = $1', [server.id]);
-    const findings = evaluate(snapshot, inv?.inventory ?? null, recentCpu);
+    const diskFullDays = await diskTrend(db, server.id);
+    const findings = evaluate(snapshot, inv?.inventory ?? null, recentCpu, diskFullDays);
     await syncAlerts(db, server.id, findings, 'report', (msg) => req.log.warn(msg));
 
     const script = config.agentAutoUpdate ? await agentScript() : null;

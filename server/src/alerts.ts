@@ -26,6 +26,9 @@ export const THRESHOLDS = {
   veeamWarnHours: 74,
   veeamCritHours: 98,
   queueWarnMinutes: 60,
+  dumpShrinkRatio: 0.5, // dump < 50 % du précédent : tronqué ou base vidée
+  diskFullWarnDays: 30, // tendance : disque plein dans moins de 30 j / 7 j
+  diskFullCritDays: 7,
   certWarnDays: 15,
   certCritDays: 3,
 };
@@ -33,13 +36,17 @@ export const THRESHOLDS = {
 /** Services surveillés : une alerte critique s'ils ne tournent pas. */
 export const CRITICAL_SERVICES = ['Apache2.4', 'EzGED', 'MySQL'];
 
+function mb(bytes: number): string {
+  return `${(bytes / 1_048_576).toFixed(1)} Mo`;
+}
+
 function duration(minutes: number): string {
   if (minutes < 120) return `${Math.round(minutes)} min`;
   if (minutes < 2880) return `${Math.round(minutes / 60)} h`;
   return `${Math.round(minutes / 1440)} j`;
 }
 
-export function evaluate(snap: Snapshot, inv: Inventory | null, recentCpu: number[]): Finding[] {
+export function evaluate(snap: Snapshot, inv: Inventory | null, recentCpu: number[], diskFullDays: number | null = null): Finding[] {
   const out: Finding[] = [];
   const m = snap.metrics ?? {};
 
@@ -132,6 +139,48 @@ export function evaluate(snap: Snapshot, inv: Inventory | null, recentCpu: numbe
     else if (age >= THRESHOLDS.veeamWarnHours)
       out.push({ rule: 'veeam:age', severity: 'warning', message: `Dernière sauvegarde Veeam réussie il y a ${duration(age * 60)}` });
   }
+
+  const b = snap.backup;
+  if (b?.sizeBytes && b.prevSizeBytes && b.prevSizeBytes > 1_000_000 && b.sizeBytes < b.prevSizeBytes * THRESHOLDS.dumpShrinkRatio)
+    out.push({
+      rule: 'backup:size',
+      severity: 'warning',
+      message: `Dump ${b.lastFile ?? ''} anormalement petit : ${mb(b.sizeBytes)} contre ${mb(b.prevSizeBytes)} pour le précédent`,
+    });
+
+  if (diskFullDays !== null && diskFullDays < THRESHOLDS.diskFullWarnDays)
+    out.push({
+      rule: 'diskfull',
+      severity: diskFullDays < THRESHOLDS.diskFullCritDays ? 'critical' : 'warning',
+      message: `Au rythme des 7 derniers jours, disque plein dans ${Math.max(0, Math.round(diskFullDays))} j`,
+    });
+
+  const ev = snap.events;
+  if (ev) {
+    if (ev.bugchecks > 0)
+      out.push({ rule: 'event:bugcheck', severity: 'critical', message: `Écran bleu (BugCheck) : ${ev.bugchecks} sur ${ev.hours} h` });
+    if (ev.shutdowns > 0)
+      out.push({ rule: 'event:shutdown', severity: 'warning', message: `Arrêt inattendu du serveur : ${ev.shutdowns} sur ${ev.hours} h` });
+    if (ev.diskErrors > 0)
+      out.push({ rule: 'event:disk', severity: 'critical', message: `Erreurs disque dans le journal Système : ${ev.diskErrors} sur ${ev.hours} h` });
+    if (ev.ntfsErrors > 0)
+      out.push({ rule: 'event:ntfs', severity: 'warning', message: `Erreurs NTFS (système de fichiers) : ${ev.ntfsErrors} sur ${ev.hours} h` });
+  }
+
+  for (const d of snap.disksHealth ?? []) {
+    const bad = d.predictFailure === true || /unhealthy/i.test(d.health ?? '');
+    const warn = /warning/i.test(d.health ?? '') || Boolean(d.status && !/^ok$/i.test(d.status));
+    if (bad || warn)
+      out.push({
+        rule: `smart:${d.model}`,
+        severity: bad ? 'critical' : 'warning',
+        message: `Disque ${d.model} (${d.sizeGB} Go) : ${d.predictFailure ? 'panne prédite par SMART' : `état ${d.health ?? d.status}`}`,
+      });
+  }
+
+  const dbLog = snap.logs?.mariadb;
+  if (dbLog && dbLog.errors > 0)
+    out.push({ rule: 'log:mariadb', severity: 'warning', message: `MariaDB : ${dbLog.errors} erreur(s) en 24 h – ${dbLog.last ?? ''}`.slice(0, 300) });
 
   for (const [name, q] of Object.entries(snap.queues ?? {})) {
     if (q.oldestMin !== null && q.oldestMin >= THRESHOLDS.queueWarnMinutes)

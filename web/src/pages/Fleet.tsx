@@ -69,6 +69,11 @@ function Tile({ s }: { s: ServerSummary }) {
         <MiniBar label="RAM" value={s.mem} warn={85} crit={95} />
         <MiniBar label="Disque" value={s.diskMax} warn={90} crit={95} />
       </div>
+      {s.diskFullDays !== null && s.diskFullDays < 60 && (
+        <div className={`-mt-1 text-[11px] ${s.diskFullDays < 7 ? 'text-crit' : s.diskFullDays < 30 ? 'text-warn' : 'text-muted'}`}>
+          Disque plein dans ~{s.diskFullDays} j au rythme actuel
+        </div>
+      )}
       <HealthLights lights={s.health} />
       <div className="flex justify-between gap-2 text-[11px] text-muted">
         <span title="Âge du dernier dump MariaDB">

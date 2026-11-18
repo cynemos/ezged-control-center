@@ -70,7 +70,28 @@ export interface Snapshot {
   apache?: HttpCheck[];
   /** URL publique via Apache, si configurée dans l'agent : 2xx/3xx/401/403 attendu. */
   web?: HttpCheck | null;
-  backup?: { dir: string; lastFile: string | null; lastAt: string | null; sizeBytes: number | null; ageHours: number | null };
+  backup?: {
+    dir: string;
+    lastFile: string | null;
+    lastAt: string | null;
+    sizeBytes: number | null;
+    /** Taille du dump précédent, pour repérer un dump tronqué. */
+    prevSizeBytes?: number | null;
+    ageHours: number | null;
+  };
+  /** Journal Système des dernières 24 h. */
+  events?: {
+    hours: number;
+    shutdowns: number;
+    bugchecks: number;
+    diskErrors: number;
+    ntfsErrors: number;
+    last: { at: string; kind: string; source: string; id: number; message: string }[];
+  } | null;
+  /** Disques physiques : SMART (predictFailure) et état Windows (2012+). null = non exposé (RAID, VM). */
+  disksHealth?: { model: string; sizeGB: number; status: string; predictFailure: boolean | null; health: string | null; operational: string | null }[];
+  /** Erreurs des dernières 24 h dans les journaux Apache et MariaDB. */
+  logs?: Record<string, { file: string; errors: number; lastAt: string | null; last: string | null }> | null;
   /** Processus des services surveillés (somme par exécutable). cpuPct null au premier rapport. */
   processes?: ProcessInfo[];
   /** Santé de l'agent lui-même. */

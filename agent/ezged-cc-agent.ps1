@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.2.3'
+$AgentVersion = '0.3.0'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -235,33 +235,35 @@ function Test-Http([string]$Url, [switch]$Strict, [switch]$Local) {
 }
 
 # Dump le plus recent parmi les dossiers candidats (dump_*.zip d'EzGED ou export SQL).
+function Get-DumpSize($Item) {
+  if (-not $Item) { return $null }
+  if ($Item.PSIsContainer) { return [long](Get-ChildItem -Path $Item.FullName -File -Recurse -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum }
+  return [long]$Item.Length
+}
+
 function Get-BackupState {
-  $last = $null
   $existing = @($BackupDirs | Where-Object { Test-Path $_ -PathType Container })
-  foreach ($d in $existing) {
-    # Fichier dump (zip, sql...) ou, job en singlefile = 0, dossier dump_* contenant un fichier par table.
-    $f = Get-ChildItem -Path $d -ErrorAction SilentlyContinue |
-      Where-Object {
-        ($_.PSIsContainer -and $_.Name -match '^dump') -or
-        (-not $_.PSIsContainer -and ($_.Name -match '^dump.*\.(zip|7z|gz|sql)$' -or $_.Name -match '\.sql(\.(gz|zip|7z))?$'))
-      } |
-      Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if ($f -and (-not $last -or $f.LastWriteTime -gt $last.LastWriteTime)) { $last = $f }
-  }
-  $size = $null
-  if ($last -and $last.PSIsContainer) {
-    $size = [long](Get-ChildItem -Path $last.FullName -File -Recurse -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-    $dir = $last.Parent.FullName
-  } elseif ($last) {
-    $size = $last.Length
-    $dir = $last.DirectoryName
-  } elseif ($existing.Count) { $dir = $existing -join ', ' }
+  # Fichier dump (zip, sql...) ou, job en singlefile = 0, dossier dump_* contenant un fichier par table.
+  # Les deux plus recents : le precedent sert a detecter un dump anormalement petit (tronque, base vide).
+  $recent = @($existing | ForEach-Object {
+      Get-ChildItem -Path $_ -ErrorAction SilentlyContinue |
+        Where-Object {
+          ($_.PSIsContainer -and $_.Name -match '^dump') -or
+          (-not $_.PSIsContainer -and ($_.Name -match '^dump.*\.(zip|7z|gz|sql)$' -or $_.Name -match '\.sql(\.(gz|zip|7z))?$'))
+        }
+    } | Sort-Object LastWriteTime -Descending | Select-Object -First 2)
+  $last = if ($recent.Count) { $recent[0] } else { $null }
+  $size = Get-DumpSize $last
+  $prevSize = if ($recent.Count -gt 1) { Get-DumpSize $recent[1] } else { $null }
+  if ($last -and $last.PSIsContainer) { $dir = $last.Parent.FullName }
+  elseif ($last) { $dir = $last.DirectoryName } elseif ($existing.Count) { $dir = $existing -join ', ' }
   else { $dir = ($BackupDirs | Select-Object -First 2) -join ', ' }
   return [ordered]@{
     dir       = $dir
     lastFile  = if ($last) { $last.Name } else { $null }
     lastAt    = if ($last) { ConvertTo-IsoDate $last.LastWriteTime } else { $null }
     sizeBytes = $size
+    prevSizeBytes = $prevSize
     ageHours  = if ($last) { [math]::Round(((Get-Date) - $last.LastWriteTime).TotalHours, 1) } else { $null }
   }
 }
@@ -307,6 +309,124 @@ function Get-VeeamState {
     running    = $running
     runningSince = if ($running) { ConvertTo-IsoDate $events[0].TimeCreated } else { $null }
   }
+}
+
+# Journal Systeme des dernieres 24 h : signes avant-coureurs de panne materielle ou d'instabilite.
+#   EventLog 6008 = arret inattendu ; WER-SystemErrorReporting 1001 = ecran bleu (BugCheck) ;
+#   disk 7/51/153/157 = secteur defectueux, erreur de pagination, nouvelle tentative d'E/S, disque retire ;
+#   Ntfs 55/98/137 = corruption du systeme de fichiers.
+function Get-EventHealth {
+  $since = (Get-Date).AddHours(-24)
+  $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 6008, 1001, 7, 51, 153, 157, 55, 98, 137; StartTime = $since } -MaxEvents 500 -ErrorAction SilentlyContinue)
+  $kinds = @{ shutdown = 0; bugcheck = 0; disk = 0; ntfs = 0 }
+  $last = @()
+  foreach ($e in $events) {
+    $p = [string]$e.ProviderName
+    $kind = $null
+    if ($e.Id -eq 6008 -and $p -eq 'EventLog') { $kind = 'shutdown' }
+    elseif ($e.Id -eq 1001 -and $p -match 'WER-SystemErrorReporting|BugCheck') { $kind = 'bugcheck' }
+    elseif ($p -eq 'disk' -and $e.Id -in 7, 51, 153, 157) { $kind = 'disk' }
+    elseif ($p -match 'Ntfs' -and $e.Id -in 55, 98, 137) { $kind = 'ntfs' }
+    if (-not $kind) { continue }
+    $kinds[$kind]++
+    if ($last.Count -lt 5) {
+      $msg = ([string]$e.Message -split "`r?`n")[0]
+      if ($msg.Length -gt 160) { $msg = $msg.Substring(0, 160) }
+      $last += [ordered]@{ at = ConvertTo-IsoDate $e.TimeCreated; kind = $kind; source = $p; id = $e.Id; message = $msg }
+    }
+  }
+  return [ordered]@{
+    hours     = 24
+    shutdowns = $kinds.shutdown
+    bugchecks = $kinds.bugcheck
+    diskErrors = $kinds.disk
+    ntfsErrors = $kinds.ntfs
+    last      = $last
+  }
+}
+
+# Sante des disques physiques : prediction de panne SMART (root\wmi) et, a partir de 2012,
+# etat du sous-systeme de stockage (Get-PhysicalDisk). Derriere un controleur RAID ou dans une VM,
+# SMART n'est souvent pas expose : le disque apparait alors sans prediction.
+function Get-DiskHealth {
+  $smart = @{}
+  try {
+    Get-CimInstance -Namespace root\wmi -ClassName MSStorageDriver_FailurePredictStatus -ErrorAction Stop |
+      ForEach-Object { $smart[($_.InstanceName -replace '_\d+$', '').ToUpper()] = [bool]$_.PredictFailure }
+  } catch { }
+  $phys = @{}
+  if (Get-Command Get-PhysicalDisk -ErrorAction SilentlyContinue) {
+    try {
+      Get-PhysicalDisk -ErrorAction Stop | ForEach-Object {
+        $phys[[string]$_.DeviceId] = [ordered]@{ health = [string]$_.HealthStatus; operational = [string]($_.OperationalStatus -join ',') }
+      }
+    } catch { }
+  }
+  return @(Get-CimInstance Win32_DiskDrive | ForEach-Object {
+      $pnp = ([string]$_.PNPDeviceID).ToUpper()
+      $predict = $null
+      foreach ($k in $smart.Keys) { if ($k -like "*$pnp*" -or $pnp -like "*$k*") { $predict = $smart[$k] } }
+      $p = $phys[[string]$_.Index]
+      [ordered]@{
+        model          = ([string]$_.Model).Trim()
+        sizeGB         = [math]::Round([double]$_.Size / 1GB)
+        status         = [string]$_.Status
+        predictFailure = $predict
+        health         = if ($p) { $p.health } else { $null }
+        operational    = if ($p) { $p.operational } else { $null }
+      }
+    })
+}
+
+# Fin d'un fichier texte (les journaux peuvent depasser le gigaoctet) : derniers $Bytes octets.
+function Read-FileTail([string]$Path, [int]$Bytes = 1MB) {
+  $fs = New-Object IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+  try {
+    $len = [int][Math]::Min([long]$Bytes, $fs.Length)
+    [void]$fs.Seek(-$len, [IO.SeekOrigin]::End)
+    $buf = New-Object byte[] $len
+    $read = $fs.Read($buf, 0, $len)
+    return ([Text.Encoding]::UTF8.GetString($buf, 0, $read) -split "`r?`n")
+  } finally { $fs.Close() }
+}
+
+# Erreurs des dernieres 24 h dans le journal d'erreurs d'Apache et dans celui de MariaDB.
+function Get-LogErrors {
+  $since = (Get-Date).AddHours(-24)
+  $inv = [Globalization.CultureInfo]::InvariantCulture
+  $result = [ordered]@{}
+
+  # Apache : [Wed Nov 18 14:00:00.123456 2026] [module:error] ...
+  $apacheLog = Join-Path $ApacheRoot 'logs\error.log'
+  if (Test-Path $apacheLog) {
+    $count = 0; $lastLine = $null; $lastAt = $null
+    foreach ($line in (Read-FileTail $apacheLog)) {
+      if ($line -notmatch '^\[(\w{3} \w{3} \d{2} \d{2}:\d{2}:\d{2})(?:\.\d+)? (\d{4})\] \[[^\]]*:(error|crit|alert|emerg)\]') { continue }
+      $at = [datetime]::MinValue
+      if (-not [datetime]::TryParseExact("$($Matches[1]) $($Matches[2])", 'ddd MMM dd HH:mm:ss yyyy', $inv, 'AllowWhiteSpaces', [ref]$at)) { continue }
+      if ($at -lt $since) { continue }
+      $count++; $lastLine = $line; $lastAt = $at
+    }
+    if ($lastLine -and $lastLine.Length -gt 200) { $lastLine = $lastLine.Substring(0, 200) }
+    $result.apache = [ordered]@{ file = $apacheLog; errors = $count; lastAt = ConvertTo-IsoDate $lastAt; last = $lastLine }
+  }
+
+  # MariaDB : 2026-11-18 14:00:00 0 [ERROR] ...  (fichier <hote>.err du dossier data)
+  $err = Get-ChildItem -Path (Join-Path $Root 'mysql\data') -Filter '*.err' -File -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  if ($err) {
+    $count = 0; $lastLine = $null; $lastAt = $null
+    foreach ($line in (Read-FileTail $err.FullName)) {
+      if ($line -notmatch '^(\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}:\d{2}).*\[ERROR\]') { continue }
+      $at = [datetime]::MinValue
+      if (-not [datetime]::TryParse($Matches[1], $inv, 'AllowWhiteSpaces', [ref]$at)) { continue }
+      if ($at -lt $since) { continue }
+      $count++; $lastLine = $line; $lastAt = $at
+    }
+    if ($lastLine -and $lastLine.Length -gt 200) { $lastLine = $lastLine.Substring(0, 200) }
+    $result.mariadb = [ordered]@{ file = $err.FullName; errors = $count; lastAt = ConvertTo-IsoDate $lastAt; last = $lastLine }
+  }
+  return $result
 }
 
 function Get-QueueStates {
@@ -379,7 +499,9 @@ function Get-ExeVersion([string]$Exe, [string[]]$ExeArgs, [string]$Pattern) {
 # Parcours couteux (millions de fichiers possibles) : au plus une fois par 24 h, limite a 90 s,
 # resultat garde dans state.json entre deux calculs.
 function Get-DocStorage {
-  $dir = (Read-IniKeys $EzgedConf @{ 'dirs.stockagesdir' = 'dir' }).dir
+  # docsDir impose par la configuration : stockage declare dans l'administration EzGED (hors instance.conf).
+  $dir = $cfg.docsDir
+  if (-not $dir) { $dir = (Read-IniKeys $EzgedConf @{ 'dirs.stockagesdir' = 'dir' }).dir }
   if (-not $dir) { $dir = Join-Path $Root 'var\nchp\instance' }
   $prev = $state.docs
   if (-not $ForceInventory -and $prev -and $prev.dir -eq $dir -and $prev.at -and
@@ -584,6 +706,9 @@ $report = [ordered]@{
   queues        = Invoke-Safe 'queues' { Get-QueueStates }
   db            = Invoke-Safe 'db' { Get-DbState }
   pendingReboot = Get-Cached 'reboot' 10 { Test-PendingReboot }
+  events        = Get-Cached 'events' 15 { Get-EventHealth }
+  disksHealth   = @(Get-Cached 'diskHealth' 60 { Get-DiskHealth }) | Where-Object { $_ }
+  logs          = Get-Cached 'logs' 15 { Get-LogErrors }
 }
 if ($report.backup) { $report.backup.ageHours = Get-AgeHours $report.backup.lastAt }
 if ($report.veeam) { $report.veeam.okAgeHours = Get-AgeHours $report.veeam.lastOkAt }
