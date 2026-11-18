@@ -24,7 +24,9 @@ L'agent se connecte uniquement **en sortie** (HTTPS). Aucun port à ouvrir chez 
 Chaque minute :
 - CPU, RAM, disques, durée depuis le démarrage, redémarrage en attente ;
 - services `Apache2.4`, `EzGED`, `MySQL` ;
-- réponse du serveur EzGED interne (port lu dans `instance.conf`) et, si configurée, de l'URL publique ;
+- réponse du démon EzGED interne (port lu dans `instance.conf`, 8080 par défaut, relayé par Apache) ;
+- accès web Apache, testé en local sur chaque port `Listen` de sa configuration (80 ou 8000, 443 ou 4430 en SSL, certificat non vérifié) ;
+- si configurée, réponse de l'URL publique ;
 - dernier dump dans `C:\nchp\save_dump` (âge, taille) ;
 - Veeam Agent for Windows s'il est installé : service, version, résultat de la dernière tâche et date de la dernière sauvegarde réussie (journal d'événements `Veeam Agent`) ;
 - files `enqueued`, `wait`, `ocr`, `convd`, `pdf2txt`, `ps2pdf` (nombre de fichiers, âge du plus ancien) ;
@@ -45,7 +47,7 @@ L'agent **ne lit jamais** les mots de passe de `instance.conf` ni les clés de `
 |---|---|
 | Aucun rapport depuis 5 min | critique |
 | Service Apache / EzGED / MySQL arrêté | critique |
-| Serveur EzGED ou page publique injoignable | critique |
+| Démon EzGED, accès web Apache ou page publique injoignable | critique |
 | Disque ≥ 90 % / ≥ 95 % | alerte / critique |
 | Dernier dump > 26 h / > 50 h, ou aucun dump | alerte / critique |
 | Veeam : service arrêté ou dernière tâche en échec | critique |

@@ -55,6 +55,8 @@ export interface Snapshot {
   services?: ServiceInfo[];
   /** Serveur EzGED interne (port de instance.conf) : toute réponse HTTP < 500 = vivant. */
   http?: HttpCheck;
+  /** Apache testé en local sur chaque port Listen de sa configuration (80/8000, 443/4430...). */
+  apache?: HttpCheck[];
   /** URL publique via Apache, si configurée dans l'agent : 2xx/3xx/401/403 attendu. */
   web?: HttpCheck | null;
   backup?: { dir: string; lastFile: string | null; lastAt: string | null; sizeBytes: number | null; ageHours: number | null };

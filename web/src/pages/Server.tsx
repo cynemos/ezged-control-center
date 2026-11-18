@@ -136,7 +136,11 @@ export default function Server() {
                 <Pill tone={sv.status === 'Running' ? 'ok' : 'crit'}>{sv.status}</Pill>
               </li>
             ))}
-            {([['Serveur EzGED (interne)', snap.http], ['Page publique', snap.web]] as [string, any][])
+            {([
+              ['Démon EzGED', snap.http],
+              ...(snap.apache ?? []).map((h: any) => [`Apache ${h.url.startsWith('https') ? 'HTTPS' : 'HTTP'} :${new URL(h.url).port || (h.url.startsWith('https') ? 443 : 80)}`, h]),
+              ['Page publique', snap.web],
+            ] as [string, any][])
               .filter(([, h]) => h)
               .map(([label, h]) => (
               <li key={label} className="flex items-center justify-between gap-2">

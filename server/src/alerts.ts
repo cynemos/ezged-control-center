@@ -68,6 +68,15 @@ export function evaluate(snap: Snapshot, inv: Inventory | null, recentCpu: numbe
       message: `Serveur EzGED injoignable (${snap.http.url}) : ${snap.http.error ?? `HTTP ${snap.http.status}`}`,
     });
 
+  for (const h of snap.apache ?? []) {
+    if (!h.ok)
+      out.push({
+        rule: `apache:${h.url}`,
+        severity: 'critical',
+        message: `Accès web Apache en échec (${h.url}) : ${h.error ?? `HTTP ${h.status}`}`,
+      });
+  }
+
   if (snap.web && !snap.web.ok)
     out.push({
       rule: 'web',

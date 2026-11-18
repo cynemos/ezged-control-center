@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.1.3'
+$AgentVersion = '0.1.4'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -120,13 +120,19 @@ function Get-ServiceStates {
 
 # Strict : seuls 2xx/3xx/401/403 sont valides (page reellement servie).
 # Sinon : toute reponse HTTP < 500 prouve que le processus ecoute (le serveur EzGED renvoie 404 sur /).
-function Test-Http([string]$Url, [switch]$Strict) {
+# -Local : test en boucle locale (127.0.0.1), sans suivre les redirections (souvent vers le nom public)
+# et sans verifier le certificat, qui ne peut pas correspondre a 127.0.0.1.
+function Test-Http([string]$Url, [switch]$Strict, [switch]$Local) {
   $code = $null; $err = $null
   $sw = [Diagnostics.Stopwatch]::StartNew()
   try {
+    if ($Url.StartsWith('https')) {
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
+    }
     $req = [Net.HttpWebRequest]::Create($Url)
     $req.Timeout = 10000
-    $req.AllowAutoRedirect = $true
+    $req.AllowAutoRedirect = -not $Local
+    if ($Local) { $req.ServerCertificateValidationCallback = { $true } }
     $resp = $req.GetResponse()
     $code = [int]$resp.StatusCode
     $resp.Close()
@@ -332,17 +338,51 @@ function Read-IniKeys([string]$Path, [hashtable]$Wanted) {
   return $result
 }
 
-function Get-ApacheCertificates {
+function Resolve-ApachePath([string]$p) {
+  $p = $p.Trim().Trim('"').Replace('${SRVROOT}', $ApacheRoot).Replace('/', '\')
+  if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $ApacheRoot $p }
+}
+
+# httpd.conf + fichiers inclus (un niveau), lignes commentees ignorees.
+function Get-ApacheConfFiles {
   $httpd = Join-Path $ApacheRoot 'conf\httpd.conf'
   if (-not (Test-Path $httpd)) { return @() }
-  $resolve = { param($p) $p = $p.Trim('"').Replace('${SRVROOT}', $ApacheRoot).Replace('/', '\'); if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $ApacheRoot $p } }
-  # httpd.conf + fichiers inclus (un niveau), lignes commentees ignorees.
   $files = @($httpd)
   foreach ($line in Get-Content $httpd) {
     if ($line -match '^\s*Include(?:Optional)?\s+(.+)$') {
-      $files += @(Get-ChildItem -Path (& $resolve $Matches[1]) -File -ErrorAction SilentlyContinue | ForEach-Object FullName)
+      $files += @(Get-ChildItem -Path (Resolve-ApachePath $Matches[1]) -File -ErrorAction SilentlyContinue | ForEach-Object FullName)
     }
   }
+  return $files
+}
+
+# Ports Apache (directives Listen) et protocole : https si "Listen 443 https" ou si un
+# <VirtualHost *:port> active SSLEngine. Ports habituels sur EzGED : 80 ou 8000, 443 ou 4430.
+function Get-ApacheListen {
+  $ports = [ordered]@{}
+  $ssl = @{}
+  foreach ($f in @(Get-ApacheConfFiles)) {
+    $vhostPorts = @()
+    foreach ($line in Get-Content $f) {
+      if ($line -match '^\s*Listen\s+(?:\S+:)?(\d+)(?:\s+(\w+))?') {
+        $ports[$Matches[1]] = $true
+        if ($Matches[2] -eq 'https') { $ssl[$Matches[1]] = $true }
+      } elseif ($line -match '^\s*<VirtualHost\s+([^>]+)>') {
+        $vhostPorts = @([regex]::Matches($Matches[1], ':(\d+)') | ForEach-Object { $_.Groups[1].Value })
+      } elseif ($line -match '^\s*</VirtualHost>') {
+        $vhostPorts = @()
+      } elseif ($line -match '^\s*SSLEngine\s+on') {
+        foreach ($vp in $vhostPorts) { $ssl[$vp] = $true }
+      }
+    }
+  }
+  return @($ports.Keys | ForEach-Object { [ordered]@{ port = [int]$_; https = [bool]$ssl[$_] } })
+}
+
+function Get-ApacheCertificates {
+  $files = @(Get-ApacheConfFiles)
+  if (-not $files.Count) { return @() }
+  $resolve = { param($p) Resolve-ApachePath $p }
   $certs = @()
   $seen = @{}
   foreach ($f in $files) {
@@ -445,6 +485,14 @@ $report = [ordered]@{
     if (-not $port) { $port = '8080' }
     Test-Http "http://127.0.0.1:$port/"
   }
+  # Acces web via Apache, teste en local sur chaque port Listen.
+  # Toute reponse < 500 prouve qu'Apache sert le port (la racine peut renvoyer 404 selon la configuration).
+  apache        = @(Invoke-Safe 'apache' {
+    Get-ApacheListen | ForEach-Object {
+      $scheme = if ($_.https) { 'https' } else { 'http' }
+      Test-Http "${scheme}://127.0.0.1:$($_.port)/" -Local
+    }
+  } @())
   web           = if ($WebUrl) { Invoke-Safe 'web' { Test-Http $WebUrl -Strict } } else { $null }
   backup        = Invoke-Safe 'backup' { Get-BackupState }
   veeam         = Invoke-Safe 'veeam' { Get-VeeamState }
