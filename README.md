@@ -26,6 +26,7 @@ Chaque minute :
 - services `Apache2.4`, `EzGED`, `MySQL` ;
 - réponse du serveur EzGED interne (port lu dans `instance.conf`) et, si configurée, de l'URL publique ;
 - dernier dump dans `C:\nchp\save_dump` (âge, taille) ;
+- Veeam Agent for Windows s'il est installé : service, version, résultat de la dernière tâche et date de la dernière sauvegarde réussie (journal d'événements `Veeam Agent`) ;
 - files `enqueued`, `wait`, `ocr`, `convd`, `pdf2txt`, `ps2pdf` (nombre de fichiers, âge du plus ancien) ;
 - compteurs MariaDB si un compte de supervision est configuré.
 
@@ -47,6 +48,9 @@ L'agent **ne lit jamais** les mots de passe de `instance.conf` ni les clés de `
 | Serveur EzGED ou page publique injoignable | critique |
 | Disque ≥ 90 % / ≥ 95 % | alerte / critique |
 | Dernier dump > 26 h / > 50 h, ou aucun dump | alerte / critique |
+| Veeam : service arrêté ou dernière tâche en échec | critique |
+| Veeam : dernière tâche en avertissement | alerte |
+| Veeam : dernière réussite > 74 h / > 98 h (marge pour le week-end) | alerte / critique |
 | Fichier en file depuis > 60 min | alerte |
 | RAM ≥ 95 %, CPU moyen ≥ 90 % sur 5 min | alerte |
 | Certificat expirant < 15 j / < 3 j | alerte / critique |

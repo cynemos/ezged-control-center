@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.1.2'
+$AgentVersion = '0.1.3'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -175,6 +175,49 @@ function Get-BackupState {
     lastAt    = if ($last) { ConvertTo-IsoDate $last.LastWriteTime } else { $null }
     sizeBytes = $size
     ageHours  = if ($last) { [math]::Round(((Get-Date) - $last.LastWriteTime).TotalHours, 1) } else { $null }
+  }
+}
+
+# Veeam Agent for Windows (optionnel) : service, version et resultat des taches lus dans le
+# journal 'Veeam Agent' (110 = tache demarree, 190 = tache terminee avec Success/Warning/Failed).
+# Renvoie $null si Veeam n'est pas installe.
+function Get-VeeamState {
+  $svc = Get-Service -Name 'VeeamEndpointBackupSvc' -ErrorAction SilentlyContinue
+  if (-not $svc) { return $null }
+  $version = $null
+  try {
+    $path = (Get-CimInstance Win32_Service -Filter "Name='VeeamEndpointBackupSvc'").PathName
+    if ($path -match '^"([^"]+)"' -or $path -match '^(\S+)') { $version = (Get-Item $Matches[1]).VersionInfo.ProductVersion }
+  } catch { }
+  $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Veeam Agent'; Id = 110, 190 } -MaxEvents 200 -ErrorAction SilentlyContinue)
+  $last = $null; $lastOk = $null; $job = $null; $result = $null; $details = $null
+  foreach ($e in $events) {
+    if ($e.Id -ne 190) { continue }
+    $msg = [string]$e.Message
+    $r = if ($msg -match 'finished with (\w+)') { $Matches[1] }
+         elseif ($e.Level -eq 2) { 'Failed' } elseif ($e.Level -eq 3) { 'Warning' } else { 'Success' }
+    if (-not $last) {
+      $last = $e; $result = $r
+      if ($msg -match "Veeam Agent '([^']+)'") { $job = $Matches[1] }
+      if ($msg -match 'Job details:\s*(.+)') { $details = $Matches[1].Trim() }
+      if ($details -and $details.Length -gt 300) { $details = $details.Substring(0, 300) }
+    }
+    # Warning : point de restauration cree malgre un avertissement, compte comme sauvegarde valide.
+    if ($r -eq 'Success' -or $r -eq 'Warning') { $lastOk = $e; break }
+  }
+  # Tache en cours si le dernier evenement est un demarrage.
+  $running = ($events.Count -gt 0) -and ($events[0].Id -eq 110)
+  return [ordered]@{
+    service    = $svc.Status.ToString()
+    version    = $version
+    job        = $job
+    lastResult = $result
+    lastAt     = if ($last) { ConvertTo-IsoDate $last.TimeCreated } else { $null }
+    details    = $details
+    lastOkAt   = if ($lastOk) { ConvertTo-IsoDate $lastOk.TimeCreated } else { $null }
+    okAgeHours = if ($lastOk) { [math]::Round(((Get-Date) - $lastOk.TimeCreated).TotalHours, 1) } else { $null }
+    running    = $running
+    runningSince = if ($running) { ConvertTo-IsoDate $events[0].TimeCreated } else { $null }
   }
 }
 
@@ -404,6 +447,7 @@ $report = [ordered]@{
   }
   web           = if ($WebUrl) { Invoke-Safe 'web' { Test-Http $WebUrl -Strict } } else { $null }
   backup        = Invoke-Safe 'backup' { Get-BackupState }
+  veeam         = Invoke-Safe 'veeam' { Get-VeeamState }
   queues        = Invoke-Safe 'queues' { Get-QueueStates }
   db            = Invoke-Safe 'db' { Get-DbState }
   pendingReboot = Invoke-Safe 'reboot' { Test-PendingReboot } $false

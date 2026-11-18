@@ -27,6 +27,19 @@ export interface HttpCheck {
   error?: string | null;
 }
 
+export interface VeeamInfo {
+  service: string;
+  version?: string | null;
+  job?: string | null;
+  lastResult?: string | null; // Success, Warning, Failed
+  lastAt?: string | null;
+  details?: string | null;
+  lastOkAt?: string | null;
+  okAgeHours?: number | null;
+  running?: boolean;
+  runningSince?: string | null;
+}
+
 export interface Snapshot {
   agentVersion?: string;
   hostname?: string;
@@ -45,6 +58,8 @@ export interface Snapshot {
   /** URL publique via Apache, si configurée dans l'agent : 2xx/3xx/401/403 attendu. */
   web?: HttpCheck | null;
   backup?: { dir: string; lastFile: string | null; lastAt: string | null; sizeBytes: number | null; ageHours: number | null };
+  /** Veeam Agent for Windows, absent (null) si non installé. */
+  veeam?: VeeamInfo | null;
   queues?: Record<string, QueueInfo>;
   db?: {
     ok: boolean;

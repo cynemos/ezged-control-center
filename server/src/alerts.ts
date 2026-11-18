@@ -19,6 +19,9 @@ export const THRESHOLDS = {
   cpuWarnPct: 90, // moyenne des 5 dernières mesures
   backupWarnHours: 26,
   backupCritHours: 50,
+  // Veeam : souvent planifié du lundi au vendredi, d'où une marge couvrant le week-end (vendredi soir -> lundi soir = 72 h).
+  veeamWarnHours: 74,
+  veeamCritHours: 98,
   queueWarnMinutes: 60,
   certWarnDays: 15,
   certCritDays: 3,
@@ -80,6 +83,23 @@ export function evaluate(snap: Snapshot, inv: Inventory | null, recentCpu: numbe
       out.push({ rule: 'backup', severity: 'critical', message: `Dernière sauvegarde il y a ${Math.round(age)} h` });
     else if (age >= THRESHOLDS.backupWarnHours)
       out.push({ rule: 'backup', severity: 'warning', message: `Dernière sauvegarde il y a ${Math.round(age)} h` });
+  }
+
+  const v = snap.veeam;
+  if (v) {
+    if (v.service !== 'Running')
+      out.push({ rule: 'veeam:service', severity: 'critical', message: `Service Veeam Agent : ${v.service}` });
+    if (v.lastResult === 'Failed')
+      out.push({ rule: 'veeam:result', severity: 'critical', message: `Sauvegarde Veeam${v.job ? ` « ${v.job} »` : ''} en échec${v.details ? ` : ${v.details}` : ''}` });
+    else if (v.lastResult === 'Warning')
+      out.push({ rule: 'veeam:result', severity: 'warning', message: `Sauvegarde Veeam${v.job ? ` « ${v.job} »` : ''} terminée avec avertissement${v.details ? ` : ${v.details}` : ''}` });
+    const age = v.okAgeHours;
+    if (age === null || age === undefined)
+      out.push({ rule: 'veeam:age', severity: 'warning', message: 'Veeam installé mais aucune sauvegarde réussie dans le journal' });
+    else if (age >= THRESHOLDS.veeamCritHours)
+      out.push({ rule: 'veeam:age', severity: 'critical', message: `Dernière sauvegarde Veeam réussie il y a ${duration(age * 60)}` });
+    else if (age >= THRESHOLDS.veeamWarnHours)
+      out.push({ rule: 'veeam:age', severity: 'warning', message: `Dernière sauvegarde Veeam réussie il y a ${duration(age * 60)}` });
   }
 
   for (const [name, q] of Object.entries(snap.queues ?? {})) {

@@ -170,6 +170,27 @@ export default function Server() {
           />
         </Card>
 
+        {snap.veeam && (
+          <Card title="Veeam Agent" right={<span className="text-xs text-muted">{snap.veeam.version}</span>}>
+            <Kv
+              rows={[
+                ['Service', <span className={snap.veeam.service === 'Running' ? '' : 'text-crit'}>{snap.veeam.service}</span>],
+                ['Tâche', snap.veeam.job],
+                [
+                  'Dernier résultat',
+                  <span className={snap.veeam.lastResult === 'Failed' ? 'text-crit' : snap.veeam.lastResult === 'Warning' ? 'text-warn' : ''}>
+                    {snap.veeam.lastResult ?? '—'}
+                    {snap.veeam.lastAt && ` · ${dateTime(snap.veeam.lastAt)}`}
+                  </span>,
+                ],
+                ['Dernière réussite', <span className={snap.veeam.okAgeHours > 74 ? 'text-warn' : ''}>{hours(snap.veeam.okAgeHours)}</span>],
+                ['Détail', snap.veeam.details],
+                ['En cours', snap.veeam.running ? `oui, depuis ${dateTime(snap.veeam.runningSince)}` : 'non'],
+              ]}
+            />
+          </Card>
+        )}
+
         <Card title="Files de traitement EzGED">
           <ul className="space-y-1.5 text-sm">
             {Object.entries(snap.queues ?? {}).map(([name, q]: [string, any]) => (
