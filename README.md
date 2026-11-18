@@ -114,7 +114,7 @@ La page **Parc** affiche une tuile par serveur (ou un tableau, au choix) : bande
 
 ## Installer l'agent sur un serveur
 
-Systèmes pris en charge : Windows 10, Server 2008 R2 SP1, 2012/2012 R2, 2016, 2019, 2022, 2025. Prérequis : PowerShell 5.1 (WMF 5.1 à installer sur 2008 R2 et 2012) et .NET 4.5.2 minimum (4.8 conseillé). L'installeur vérifie ces points, active TLS 1.2 dans le registre si nécessaire (2008 R2 / 2012, un redémarrage peut être requis ; `-SkipTlsFix` pour ne rien toucher), teste la connexion à la console avant toute modification, puis crée la tâche planifiée avec `schtasks` (compatible 2008 R2) et attend le premier rapport.
+Systèmes pris en charge : Windows 10, Server 2008 R2 SP1, 2012/2012 R2, 2016, 2019, 2022, 2025. Prérequis : PowerShell 3.0 et .NET 4.5 minimum (4.8 conseillé). Server 2012 et ultérieurs les ont d'origine ; un 2008 R2 en PowerShell 2.0 doit recevoir WMF 3.0 (KB2506143) ou 5.1, ce qui impose un redémarrage. L'installeur vérifie ces points, active TLS 1.2 dans le registre si nécessaire (2008 R2 / 2012, un redémarrage peut être requis ; `-SkipTlsFix` pour ne rien toucher), teste la connexion à la console avant toute modification, puis crée la tâche planifiée avec `schtasks` (compatible 2008 R2) et attend le premier rapport.
 
 Depuis la page **Ajouter un serveur** de la console : copier le dossier `agent\` sur le serveur, puis en PowerShell administrateur :
 

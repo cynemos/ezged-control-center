@@ -1,7 +1,7 @@
 <#
   Installe l'agent EzGed ControlCenter sur un serveur EzGED.
   Compatible Windows 10, Server 2008 R2 SP1, 2012/2012 R2, 2016, 2019, 2022, 2025
-  (PowerShell 5.1 et .NET 4.5.2 minimum, voir les pre-controles ci-dessous).
+  (PowerShell 3.0 et .NET 4.5 minimum, voir les pre-controles ci-dessous).
 
   Exemple :
     powershell -ExecutionPolicy Bypass -File install-agent.ps1 -ServerUrl https://ezged-cc.mondomaine.fr -EnrollKey XXXX
@@ -52,13 +52,15 @@ try { $net = [int](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setu
 $netLabel = if ($net -ge 528040) { '4.8' } elseif ($net -ge 461808) { '4.7.2' } elseif ($net -ge 394802) { '4.6.2' } elseif ($net -ge 379893) { '4.5.2' } elseif ($net -gt 0) { '4.5 ou 4.5.1' } else { 'absent' }
 Write-Host ".NET 4     : $netLabel"
 
-if ($net -lt 379893) {
-  Stop-Install ".NET Framework 4.5.2 minimum requis (4.8 conseille) : installer .NET 4.8 puis relancer."
+# .NET 4.5 : TLS 1.2 et controle de certificat par requete (Server 2012 l'a d'origine).
+if ($net -lt 378389) {
+  Stop-Install ".NET Framework 4.5 minimum requis (4.8 conseille) : installer .NET 4.8 puis relancer."
 }
-if ($PSVersionTable.PSVersion.Major -lt 5 -or ($PSVersionTable.PSVersion.Major -eq 5 -and $PSVersionTable.PSVersion.Minor -lt 1)) {
+# PowerShell 3.0 suffit : pas besoin de WMF 5.1 (ni du redemarrage qu'il impose) sur 2012 / 2008 R2 a jour.
+if ($PSVersionTable.PSVersion.Major -lt 3) {
   $hint = if ([int]$os.BuildNumber -lt 7601) { 'Windows Server 2008 sans R2 SP1 n''est pas pris en charge.' }
-          else { 'Installer Windows Management Framework 5.1 (KB3191566 pour 2008 R2/2012 R2, KB3191565 pour 2012), redemarrer, puis relancer.' }
-  Stop-Install "PowerShell 5.1 requis. $hint"
+          else { 'Installer .NET 4.8 puis Windows Management Framework 3.0 (KB2506143) ou 5.1 (KB3191566), redemarrer, puis relancer.' }
+  Stop-Install "PowerShell 3.0 minimum requis (version actuelle : $($PSVersionTable.PSVersion)). $hint"
 }
 
 # TLS 1.2 : indispensable pour joindre la console (Tailscale Funnel, Caddy n'acceptent que TLS 1.2+).

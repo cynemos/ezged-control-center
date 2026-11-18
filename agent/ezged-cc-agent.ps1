@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 3.0
 <#
   EzGed ControlCenter - agent de supervision pour serveur EzGED.
   Lance par une tache planifiee (compte SYSTEM) toutes les minutes.
@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.2.0'
+$AgentVersion = '0.2.1'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
