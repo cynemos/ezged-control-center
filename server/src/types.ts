@@ -27,6 +27,17 @@ export interface HttpCheck {
   error?: string | null;
 }
 
+export interface ProcessInfo {
+  service: string;
+  name: string;
+  count: number;
+  memMB: number;
+  cpuPct: number | null;
+  handles: number;
+  threads: number;
+  startedAt: string | null;
+}
+
 export interface VeeamInfo {
   service: string;
   version?: string | null;
@@ -60,6 +71,10 @@ export interface Snapshot {
   /** URL publique via Apache, si configurée dans l'agent : 2xx/3xx/401/403 attendu. */
   web?: HttpCheck | null;
   backup?: { dir: string; lastFile: string | null; lastAt: string | null; sizeBytes: number | null; ageHours: number | null };
+  /** Processus des services surveillés (somme par exécutable). cpuPct null au premier rapport. */
+  processes?: ProcessInfo[];
+  /** Santé de l'agent lui-même. */
+  agent?: { durationMs?: number; errors?: { name: string; error: string }[]; ps?: string; dotnet?: number | null; autoUpdate?: boolean };
   /** Veeam Agent for Windows, absent (null) si non installé. */
   veeam?: VeeamInfo | null;
   queues?: Record<string, QueueInfo>;

@@ -22,13 +22,15 @@ L'agent se connecte uniquement **en sortie** (HTTPS). Aucun port à ouvrir chez 
 ## Ce que l'agent remonte
 
 Chaque minute :
-- CPU, RAM, disques, durée depuis le démarrage, redémarrage en attente ;
-- services `Apache2.4`, `EzGED`, `MySQL` ;
+- CPU, RAM, disques, durée depuis le démarrage ;
+- services `Apache2.4`, `EzGED`, `MySQL` et leurs processus (CPU, mémoire, handles, threads, date de démarrage) ;
 - réponse du démon EzGED interne (port lu dans `instance.conf`, 8080 par défaut, relayé par Apache) ;
 - accès web Apache, testé en local sur chaque port `Listen` de sa configuration (80 ou 8000, 443 ou 4430 en SSL, certificat non vérifié) ;
 - si configurée, réponse de l'URL publique ;
 - dernier dump dans `C:\nchp\save_dump` (âge, taille) ;
 - Veeam Agent for Windows s'il est installé : service, version, résultat de la dernière tâche et date de la dernière sauvegarde réussie (journal d'événements `Veeam Agent`) ;
+- toutes les 5 à 15 min (résultat gardé en cache et renvoyé entre deux calculs) : dernier dump, Veeam, redémarrage en attente, liste des ports Apache ;
+- santé de l'agent : durée de collecte, collectes en échec, versions de PowerShell et .NET ;
 - files `enqueued`, `wait`, `ocr`, `convd`, `pdf2txt`, `ps2pdf` (nombre de fichiers, âge du plus ancien) ;
 - compteurs MariaDB si un compte de supervision est configuré.
 
@@ -54,6 +56,8 @@ L'agent **ne lit jamais** les mots de passe de `instance.conf` ni les clés de `
 | Veeam : dernière tâche en avertissement | alerte |
 | Veeam : dernière réussite > 74 h / > 98 h (marge pour le week-end) | alerte / critique |
 | Fichier en file depuis > 60 min | alerte |
+| Service redémarré depuis < 15 min (hors redémarrage du serveur) | alerte |
+| Agent : collecte en échec ou plus lente que 45 s | alerte |
 | RAM ≥ 95 %, CPU moyen ≥ 90 % sur 5 min | alerte |
 | Certificat expirant < 15 j / < 3 j | alerte / critique |
 | Connexion MariaDB impossible | critique |
@@ -104,13 +108,21 @@ Depuis le serveur lui-même, l'adresse `ts.net` pointe sur sa propre IP Tailscal
 
 La variable `BASE_PATH` permet de servir la console sous n'importe quel préfixe ; l'interface et l'API s'adaptent toutes seules.
 
+## Vue du parc
+
+La page **Parc** affiche une tuile par serveur (ou un tableau, au choix) : bandeau de couleur selon l'état, CPU/RAM/disque, âge du dump et de la sauvegarde Veeam, version EzGED, et des voyants par catégorie (Agent, Système, Services, Web, Files, Dump, Veeam, SSL). Un voyant gris signifie « non surveillé sur ce serveur ». Le bouton **Plein écran** sert de mur de supervision ; la page se rafraîchit toute seule.
+
 ## Installer l'agent sur un serveur
+
+Systèmes pris en charge : Windows 10, Server 2008 R2 SP1, 2012/2012 R2, 2016, 2019, 2022, 2025. Prérequis : PowerShell 5.1 (WMF 5.1 à installer sur 2008 R2 et 2012) et .NET 4.5.2 minimum (4.8 conseillé). L'installeur vérifie ces points, active TLS 1.2 dans le registre si nécessaire (2008 R2 / 2012, un redémarrage peut être requis ; `-SkipTlsFix` pour ne rien toucher), teste la connexion à la console avant toute modification, puis crée la tâche planifiée avec `schtasks` (compatible 2008 R2) et attend le premier rapport.
 
 Depuis la page **Ajouter un serveur** de la console : copier le dossier `agent\` sur le serveur, puis en PowerShell administrateur :
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-agent.ps1 -ServerUrl https://ezged-cc.mondomaine.fr -EnrollKey <clé>
 ```
+
+Mise à jour des agents : avec `AGENT_AUTO_UPDATE=1` dans le `.env` de la console, chaque agent plus ancien télécharge le script embarqué par la console, vérifie son empreinte SHA256 et sa syntaxe, puis se remplace ; la nouvelle version tourne à la minute suivante. Activer cette option donne à la console le pouvoir d'exécuter du code en SYSTEM sur tout le parc : la protéger en conséquence (mot de passe fort, double authentification). `-NoAutoUpdate` à l'installation refuse ces mises à jour sur un serveur.
 
 L'installeur crée `C:\ProgramData\EzGedControlCenter` (accès SYSTEM et administrateurs uniquement), chiffre le jeton avec DPAPI et crée la tâche planifiée `EzGed ControlCenter Agent`.
 

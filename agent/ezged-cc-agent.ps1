@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.1.4'
+$AgentVersion = '0.2.0'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -31,9 +31,19 @@ function Write-Log([string]$Message) {
 }
 
 # Execute un bloc et renvoie $Default en cas d'erreur, sans interrompre la collecte.
+# Les echecs sont aussi remontes a la console (sante de l'agent) pour reperer un indicateur
+# qui ne fonctionne pas sur une version de Windows.
+$script:CollectErrors = New-Object System.Collections.ArrayList
 function Invoke-Safe([string]$Name, [scriptblock]$Block, $Default = $null) {
-  try { & $Block } catch { Write-Log "WARN [$Name] $($_.Exception.Message)"; $Default }
+  try { & $Block } catch {
+    $msg = $_.Exception.Message
+    Write-Log "WARN [$Name] $msg"
+    if ($msg.Length -gt 200) { $msg = $msg.Substring(0, 200) }
+    [void]$script:CollectErrors.Add([ordered]@{ name = $Name; error = $msg })
+    $Default
+  }
 }
+$script:Clock = [Diagnostics.Stopwatch]::StartNew()
 
 function ConvertTo-IsoDate($Date) {
   if ($null -eq $Date) { return $null }
@@ -75,14 +85,32 @@ $Queues = if ($cfg.queues) { @($cfg.queues) } else { @('enqueued', 'wait', 'ocr'
 $ApacheRoot = Join-Path $Root 'Apache24'
 $EzgedConf = Join-Path $Root 'etc\nchp\ezged\instance.conf'
 
-$state = @{ lastInventory = $null; inventoryIntervalMin = 60 }
+$state = @{ lastInventory = $null; inventoryIntervalMin = 60; cache = @{}; cpuTimes = @{} }
 if (Test-Path $StateFile) {
   $s = Invoke-Safe 'state' { Get-Content $StateFile -Raw | ConvertFrom-Json }
   if ($s) {
     $state.lastInventory = $s.lastInventory
     if ($s.inventoryIntervalMin) { $state.inventoryIntervalMin = $s.inventoryIntervalMin }
     if ($s.docs) { $state.docs = $s.docs }
+    if ($s.cache) { foreach ($p in $s.cache.PSObject.Properties) { $state.cache[$p.Name] = $p.Value } }
+    if ($s.cpuTimes) { foreach ($p in $s.cpuTimes.PSObject.Properties) { $state.cpuTimes[$p.Name] = $p.Value } }
   }
+}
+
+# Collectes moins urgentes : resultat garde dans state.json et renvoye tel quel entre deux calculs,
+# pour alleger les vieux serveurs sans faire clignoter les alertes cote console.
+function Get-Cached([string]$Name, [int]$Minutes, [scriptblock]$Block) {
+  $c = $state.cache[$Name]
+  if (-not $ForceInventory -and $c -and $c.at -and (((Get-Date) - [datetime]$c.at).TotalMinutes -lt $Minutes)) { return $c.value }
+  $v = Invoke-Safe $Name $Block
+  $state.cache[$Name] = @{ at = (Get-Date).ToString('o'); value = $v }
+  return $v
+}
+
+# Age en heures recalcule a chaque envoi, la valeur en cache pouvant dater de plusieurs minutes.
+function Get-AgeHours($IsoDate) {
+  if (-not $IsoDate) { return $null }
+  return [math]::Round(((Get-Date) - [datetime]$IsoDate).TotalHours, 1)
 }
 
 # ---------------------------------------------------------------- collecte rapide (chaque minute)
@@ -110,12 +138,66 @@ function Get-Metrics {
   }
 }
 
+# Win32_Service plutot que Get-Service : StartType n'existe pas avec .NET < 4.6.1 (2008 R2),
+# et on obtient le PID pour mesurer le processus.
+$script:ServiceRows = @{}
 function Get-ServiceStates {
   return @($Services | ForEach-Object {
-      $svc = Get-Service -Name $_ -ErrorAction SilentlyContinue
-      if ($svc) { [ordered]@{ name = $_; status = $svc.Status.ToString(); startType = $svc.StartType.ToString() } }
-      else { [ordered]@{ name = $_; status = 'NotFound' } }
+      $name = $_
+      $svc = Get-CimInstance Win32_Service -Filter "Name='$($name.Replace("'", "''"))'" -ErrorAction SilentlyContinue
+      if ($svc) {
+        $script:ServiceRows[$name] = $svc
+        [ordered]@{ name = $name; status = ($svc.State -replace ' ', ''); startType = $svc.StartMode }
+      } else { [ordered]@{ name = $name; status = 'NotFound' } }
     })
+}
+
+# Processus des services surveilles (httpd, mysqld, ezged...) : memoire, CPU, handles, depuis quand.
+# Tous les processus du meme executable sont additionnes (Apache = parent + enfant qui travaille).
+# CPU = temps processeur consomme depuis le rapport precedent / duree ecoulee / nombre de coeurs.
+function Get-ProcessStates {
+  $now = Get-Date
+  $cores = [Environment]::ProcessorCount
+  $newTimes = @{}
+  $out = @()
+  foreach ($name in $Services) {
+    $svc = $script:ServiceRows[$name]
+    if (-not $svc -or -not $svc.ProcessId) { continue }
+    $main = Get-Process -Id $svc.ProcessId -ErrorAction SilentlyContinue
+    if (-not $main) { continue }
+    $procs = @(Get-Process -Name $main.ProcessName -ErrorAction SilentlyContinue)
+    $cpuSec = 0.0
+    foreach ($p in $procs) { try { $cpuSec += $p.TotalProcessorTime.TotalSeconds } catch { } }
+    $key = "$name|$($svc.ProcessId)"
+    $newTimes[$key] = @{ at = $now.ToString('o'); cpu = $cpuSec }
+    $cpuPct = $null
+    $prev = $state.cpuTimes[$key]
+    if ($prev) {
+      $elapsed = ($now - [datetime]$prev.at).TotalSeconds
+      if ($elapsed -gt 5 -and $cpuSec -ge [double]$prev.cpu) {
+        $cpuPct = [math]::Round(100 * ($cpuSec - [double]$prev.cpu) / $elapsed / $cores, 1)
+      }
+    }
+    $started = $null
+    try { $started = ConvertTo-IsoDate $main.StartTime } catch { }
+    if (-not $started) {
+      # StartTime peut etre refuse sur un processus systeme : Win32_Process le donne toujours.
+      try { $started = ConvertTo-IsoDate (Get-CimInstance Win32_Process -Filter "ProcessId=$($svc.ProcessId)").CreationDate } catch { }
+    }
+    $out += [ordered]@{
+      service   = $name
+      name      = $main.ProcessName
+      count     = $procs.Count
+      memMB     = [math]::Round((($procs | Measure-Object WorkingSet64 -Sum).Sum) / 1MB)
+      cpuPct    = $cpuPct
+      handles   = ($procs | Measure-Object HandleCount -Sum).Sum
+      threads   = ($procs | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum
+      startedAt = $started
+    }
+  }
+  # Le PID fait partie de la cle : un redemarrage du service repart d'une mesure neuve.
+  $state.cpuTimes = $newTimes
+  return $out
 }
 
 # Strict : seuls 2xx/3xx/401/403 sont valides (page reellement servie).
@@ -473,6 +555,8 @@ function Get-Inventory {
 }
 
 # ---------------------------------------------------------------- envoi
+# Frequences : chaque minute pour ce qui peut tomber (services, ports, ressources, files),
+# 5 a 15 min pour le reste (resultat en cache), inventaire toutes les heures.
 $report = [ordered]@{
   agentVersion  = $AgentVersion
   hostname      = $env:COMPUTERNAME
@@ -480,26 +564,30 @@ $report = [ordered]@{
   collectedAt   = ConvertTo-IsoDate (Get-Date)
   metrics       = Invoke-Safe 'metrics' { Get-Metrics }
   services      = @(Invoke-Safe 'services' { Get-ServiceStates } @())
+  processes     = @(Invoke-Safe 'processes' { Get-ProcessStates } @())
   http          = Invoke-Safe 'http' {
     $port = (Read-IniKeys $EzgedConf @{ 'ezged.port' = 'port' }).port
     if (-not $port) { $port = '8080' }
     Test-Http "http://127.0.0.1:$port/"
   }
-  # Acces web via Apache, teste en local sur chaque port Listen.
+  # Acces web via Apache, teste en local sur chaque port Listen (liste relue toutes les 15 min).
   # Toute reponse < 500 prouve qu'Apache sert le port (la racine peut renvoyer 404 selon la configuration).
   apache        = @(Invoke-Safe 'apache' {
-    Get-ApacheListen | ForEach-Object {
+    @(Get-Cached 'apacheListen' 15 { Get-ApacheListen }) | Where-Object { $_ } | ForEach-Object {
       $scheme = if ($_.https) { 'https' } else { 'http' }
       Test-Http "${scheme}://127.0.0.1:$($_.port)/" -Local
     }
   } @())
   web           = if ($WebUrl) { Invoke-Safe 'web' { Test-Http $WebUrl -Strict } } else { $null }
-  backup        = Invoke-Safe 'backup' { Get-BackupState }
-  veeam         = Invoke-Safe 'veeam' { Get-VeeamState }
+  backup        = Get-Cached 'backup' 10 { Get-BackupState }
+  veeam         = Get-Cached 'veeam' 5 { Get-VeeamState }
   queues        = Invoke-Safe 'queues' { Get-QueueStates }
   db            = Invoke-Safe 'db' { Get-DbState }
-  pendingReboot = Invoke-Safe 'reboot' { Test-PendingReboot } $false
+  pendingReboot = Get-Cached 'reboot' 10 { Test-PendingReboot }
 }
+if ($report.backup) { $report.backup.ageHours = Get-AgeHours $report.backup.lastAt }
+if ($report.veeam) { $report.veeam.okAgeHours = Get-AgeHours $report.veeam.lastOkAt }
+if ($null -eq $report.pendingReboot) { $report.pendingReboot = $false }
 
 $inventoryDue = $ForceInventory -or -not $state.lastInventory -or
   (((Get-Date) - [datetime]$state.lastInventory).TotalMinutes -ge $state.inventoryIntervalMin)
@@ -507,11 +595,39 @@ if ($inventoryDue) {
   $report.inventory = Invoke-Safe 'inventory' { Get-Inventory }
 }
 
+# Sante de l'agent : duree de collecte, collectes en echec, environnement d'execution.
+$report.agent = [ordered]@{
+  durationMs = [int]$script:Clock.ElapsedMilliseconds
+  errors     = @($script:CollectErrors)
+  ps         = $PSVersionTable.PSVersion.ToString()
+  dotnet     = Invoke-Safe 'dotnet' { [int](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release).Release }
+  autoUpdate = ($cfg.autoUpdate -ne $false)
+}
+
 $json = $report | ConvertTo-Json -Depth 8 -Compress
 
 if ($DryRun) {
   $report | ConvertTo-Json -Depth 8
   return
+}
+
+# Mise a jour de l'agent proposee par la console : uniquement vers une version superieure,
+# script verifie par son empreinte SHA256 et par une analyse syntaxique avant de remplacer celui-ci.
+function Update-Agent($Offer, [string]$Token) {
+  if ($cfg.autoUpdate -eq $false -or -not $Offer -or -not $Offer.version -or -not $Offer.sha256) { return }
+  if ([version]$Offer.version -le [version]$AgentVersion) { return }
+  $url = $cfg.serverUrl.TrimEnd('/') + '/api/agent/script'
+  $tmp = Join-Path $BaseDir 'ezged-cc-agent.new'
+  Invoke-WebRequest -Uri $url -Headers @{ Authorization = "Bearer $Token" } -OutFile $tmp -TimeoutSec 60 -UseBasicParsing
+  $sha = [Security.Cryptography.SHA256]::Create()
+  $stream = [IO.File]::OpenRead($tmp)
+  try { $hash = -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) } finally { $stream.Close() }
+  if ($hash -ne ([string]$Offer.sha256).ToLower()) { Remove-Item $tmp -Force; throw "empreinte differente ($hash)" }
+  $tokens = $null; $parseErrors = $null
+  [void][Management.Automation.Language.Parser]::ParseFile($tmp, [ref]$tokens, [ref]$parseErrors)
+  if ($parseErrors.Count) { Remove-Item $tmp -Force; throw "script invalide : $($parseErrors[0].Message)" }
+  Move-Item $tmp $PSCommandPath -Force
+  Write-Log "Agent mis a jour : $AgentVersion -> $($Offer.version)"
 }
 
 try {
@@ -522,8 +638,11 @@ try {
     -Body ([Text.Encoding]::UTF8.GetBytes($json)) -TimeoutSec 30 -UseBasicParsing
   if ($inventoryDue -and $report.inventory) { $state.lastInventory = (Get-Date).ToString('o') }
   if ($resp.inventoryIntervalMin) { $state.inventoryIntervalMin = [int]$resp.inventoryIntervalMin }
-  $state | ConvertTo-Json | Set-Content -Path $StateFile -Encoding UTF8
+  $state | ConvertTo-Json -Depth 10 | Set-Content -Path $StateFile -Encoding UTF8
 } catch {
   Write-Log "ERROR envoi : $($_.Exception.Message)"
   exit 1
 }
+
+# Apres l'envoi : un echec de mise a jour ne doit pas empecher le rapport.
+Invoke-Safe 'update' { Update-Agent $resp.agentUpdate $token } | Out-Null

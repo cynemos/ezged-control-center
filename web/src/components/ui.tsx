@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { Status } from '../api';
+import type { HealthLight, LightState, Status } from '../api';
 
 export const STATUS_LABEL: Record<Status, string> = {
   ok: 'OK',
@@ -28,7 +28,7 @@ export function StatusDot({ status }: { status: Status }) {
 
 export function Card({ title, children, right, className = '' }: { title?: string; children: ReactNode; right?: ReactNode; className?: string }) {
   return (
-    <section className={`rounded-lg border border-line bg-panel ${className}`}>
+    <section className={`min-w-0 rounded-lg border border-line bg-panel ${className}`}>
       {title && (
         <header className="flex items-center justify-between border-b border-line px-4 py-2.5">
           <h2 className="text-sm font-semibold">{title}</h2>
@@ -99,5 +99,49 @@ export function Button({
     <button type={type} onClick={onClick} disabled={disabled} className={`rounded-md border px-3 py-1.5 text-sm disabled:opacity-50 ${cls}`}>
       {children}
     </button>
+  );
+}
+
+const LIGHT_CLASS: Record<LightState, string> = {
+  ok: 'border-ok/40 bg-ok/15 text-ok',
+  warning: 'border-warn/50 bg-warn/15 text-warn',
+  critical: 'border-crit/60 bg-crit/20 text-crit',
+  na: 'border-line bg-panel-2 text-muted/60',
+};
+const LIGHT_TITLE: Record<LightState, string> = { ok: 'OK', warning: 'alerte', critical: 'critique', na: 'non surveillé' };
+
+/** Voyants de santé par catégorie (agent, système, services, web, files, dump, Veeam, SSL). */
+export function HealthLights({ lights, size = 'sm' }: { lights: HealthLight[]; size?: 'sm' | 'md' }) {
+  return (
+    <div className={`flex flex-wrap ${size === 'md' ? 'gap-1.5' : 'gap-1'}`}>
+      {lights.map((l) => (
+        <span
+          key={l.key}
+          title={`${l.label} : ${LIGHT_TITLE[l.state]}`}
+          className={`rounded border font-medium leading-none ${LIGHT_CLASS[l.state]} ${
+            size === 'md' ? 'px-2 py-1 text-xs' : 'px-1.5 py-[3px] text-[10px]'
+          } ${l.state === 'critical' ? 'animate-pulse' : ''}`}
+        >
+          {l.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Mini barre verticale + valeur, pour les tuiles. */
+export function MiniBar({ label, value, warn = 80, crit = 90 }: { label: string; value: number | null | undefined; warn?: number; crit?: number }) {
+  const v = value ?? null;
+  const color = v === null ? 'bg-panel-2' : v >= crit ? 'bg-crit' : v >= warn ? 'bg-warn' : 'bg-ok';
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="flex items-baseline justify-between text-[10px] text-muted">
+        <span>{label}</span>
+        <span className="tabular-nums text-text">{v === null ? '—' : `${Math.round(v)}%`}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded bg-panel-2">
+        <div className={`h-full ${color}`} style={{ width: `${Math.min(100, v ?? 0)}%` }} />
+      </div>
+    </div>
   );
 }

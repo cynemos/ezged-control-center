@@ -17,6 +17,8 @@ export const THRESHOLDS = {
   diskCritPct: 95,
   memWarnPct: 95,
   cpuWarnPct: 90, // moyenne des 5 dernières mesures
+  agentSlowMs: 45_000, // collecte anormalement longue (la tâche est coupée à 5 min)
+  processRestartMinutes: 15, // service redémarré récemment
   backupWarnHours: 26,
   backupCritHours: 50,
   // Veeam : souvent planifié du lundi au vendredi, d'où une marge couvrant le week-end (vendredi soir -> lundi soir = 72 h).
@@ -67,6 +69,25 @@ export function evaluate(snap: Snapshot, inv: Inventory | null, recentCpu: numbe
       severity: 'critical',
       message: `Serveur EzGED injoignable (${snap.http.url}) : ${snap.http.error ?? `HTTP ${snap.http.status}`}`,
     });
+
+  for (const p of snap.processes ?? []) {
+    if (!p.startedAt) continue;
+    const min = (Date.now() - new Date(p.startedAt).getTime()) / 60_000;
+    // Seulement si la machine tourne depuis plus longtemps : un redémarrage du serveur n'est pas un incident de service.
+    const upMin = (m.uptimeHours ?? 0) * 60;
+    if (min >= 0 && min < THRESHOLDS.processRestartMinutes && upMin > THRESHOLDS.processRestartMinutes)
+      out.push({ rule: `restart:${p.service}`, severity: 'warning', message: `Service ${p.service} redémarré il y a ${duration(min)}` });
+  }
+
+  const ag = snap.agent;
+  if (ag?.errors?.length)
+    out.push({
+      rule: 'agent:errors',
+      severity: 'warning',
+      message: `Agent : collecte en échec (${ag.errors.map((e) => e.name).join(', ')}) – ${ag.errors[0].error}`,
+    });
+  if (ag?.durationMs && ag.durationMs >= THRESHOLDS.agentSlowMs)
+    out.push({ rule: 'agent:slow', severity: 'warning', message: `Agent : collecte lente (${Math.round(ag.durationMs / 1000)} s)` });
 
   for (const h of snap.apache ?? []) {
     if (!h.ok)

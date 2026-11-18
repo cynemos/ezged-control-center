@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api, type AlertRow, type ServerSummary } from '../api';
-import { Button, Card, Gauge, Kv, Pill, StatusDot } from '../components/ui';
+import { Button, Card, Gauge, HealthLights, Kv, Pill, StatusDot } from '../components/ui';
 import { ago, bytes, dateTime, hours } from '../format';
 import { usePoll } from '../hooks';
 
@@ -78,6 +78,8 @@ export default function Server() {
         </div>
       </div>
 
+      <HealthLights lights={s.health} size="md" />
+
       {deleting && <DeleteConfirm s={s} onCancel={() => setDeleting(false)} />}
 
       {editing && <EditForm s={s} onDone={() => { setEditing(false); void reload(); }} />}
@@ -149,6 +151,75 @@ export default function Server() {
               </li>
             ))}
           </ul>
+        </Card>
+
+        <Card title="Processus surveillés" className="lg:col-span-2">
+          {(snap.processes ?? []).length ? (
+            <div className="overflow-x-auto">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Service</th>
+                    <th>Processus</th>
+                    <th>CPU</th>
+                    <th>Mémoire</th>
+                    <th>Handles</th>
+                    <th>Threads</th>
+                    <th>Démarré</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snap.processes.map((p: any) => {
+                    const upMin = p.startedAt ? (Date.now() - new Date(p.startedAt).getTime()) / 60_000 : null;
+                    return (
+                      <tr key={p.service}>
+                        <td>{p.service}</td>
+                        <td className="text-muted">
+                          {p.name}
+                          {p.count > 1 && <span className="text-xs"> ×{p.count}</span>}
+                        </td>
+                        <td>{p.cpuPct === null ? <span className="text-muted">—</span> : <Gauge value={p.cpuPct} warn={70} crit={90} />}</td>
+                        <td className="tabular-nums">{bytes(p.memMB * 1048576)}</td>
+                        <td className={`tabular-nums ${p.handles > 10000 ? 'text-warn' : ''}`}>{p.handles}</td>
+                        <td className="tabular-nums">{p.threads}</td>
+                        <td className={upMin !== null && upMin < 60 ? 'text-warn' : 'text-muted'}>{p.startedAt ? ago(p.startedAt) : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted">Disponible à partir de l'agent 0.2.0.</p>
+          )}
+        </Card>
+
+        <Card title="Agent">
+          <Kv
+            rows={[
+              ['Version', s.agentVersion],
+              ['Durée collecte', snap.agent?.durationMs !== undefined ? <span className={snap.agent.durationMs > 45000 ? 'text-warn' : ''}>{(snap.agent.durationMs / 1000).toFixed(1)} s</span> : null],
+              ['PowerShell', snap.agent?.ps],
+              ['.NET', dotnetLabel(snap.agent?.dotnet)],
+              ['Mise à jour auto', snap.agent ? (snap.agent.autoUpdate ? 'acceptée' : 'refusée') : null],
+              [
+                'Collectes',
+                snap.agent ? (
+                  snap.agent.errors?.length ? (
+                    <ul className="space-y-0.5 text-warn">
+                      {snap.agent.errors.map((e: any) => (
+                        <li key={e.name}>
+                          {e.name} : <span className="text-xs">{e.error}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="text-ok">toutes OK</span>
+                  )
+                ) : null,
+              ],
+            ]}
+          />
         </Card>
 
         <Card title="Disques">
@@ -317,6 +388,12 @@ function Chart({ title, points, series, range, max }: { title: string; points: P
 }
 
 // Stockage des documents : taille, nombre de fichiers, date du calcul (quotidien côté agent).
+function dotnetLabel(release: number | null | undefined): string | null {
+  if (!release) return null;
+  const v = release >= 533320 ? '4.8.1' : release >= 528040 ? '4.8' : release >= 461808 ? '4.7.2' : release >= 460798 ? '4.7' : release >= 394802 ? '4.6.2' : release >= 393295 ? '4.6' : release >= 379893 ? '4.5.2' : '4.5';
+  return `${v} (${release})`;
+}
+
 function docsLabel(d: any): string | null {
   if (!d) return null;
   if (d.found === false) return `introuvable (${d.dir})`;

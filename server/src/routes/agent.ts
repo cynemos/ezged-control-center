@@ -1,4 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { evaluate, syncAlerts } from '../alerts.js';
 import { newToken, safeEqual, sha256 } from '../auth.js';
@@ -17,6 +20,25 @@ function versionMap(inv: Inventory | null | undefined): Record<string, string> {
   if (v.mariadb) out.mariadb = v.mariadb;
   if (inv?.os?.build) out.windows = inv.os.build;
   return out;
+}
+
+// Script agent embarqué par la console : dépôt (../agent) en dev, InstallDir\agent dans le paquet Windows.
+const AGENT_CANDIDATES = [config.agentScript, '../agent/ezged-cc-agent.ps1', '../../agent/ezged-cc-agent.ps1']
+  .filter(Boolean)
+  .map((p) => resolve(p));
+let agentCache: { path: string; mtimeMs: number; body: Buffer; version: string; sha256: string } | null = null;
+
+/** Script agent courant (relu si modifié sur disque), ou null s'il est introuvable. */
+async function agentScript() {
+  const path = AGENT_CANDIDATES.find((p) => existsSync(p));
+  if (!path) return null;
+  const { mtimeMs } = await stat(path);
+  if (!agentCache || agentCache.path !== path || agentCache.mtimeMs !== mtimeMs) {
+    const body = await readFile(path);
+    const version = /^\$AgentVersion\s*=\s*'([0-9.]+)'/m.exec(body.toString('latin1'))?.[1] ?? '';
+    agentCache = { path, mtimeMs, body, version, sha256: createHash('sha256').update(body).digest('hex') };
+  }
+  return agentCache.version ? agentCache : null;
 }
 
 function clampPct(n: unknown): number | null {
@@ -134,6 +156,18 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
     const findings = evaluate(snapshot, inv?.inventory ?? null, recentCpu);
     await syncAlerts(db, server.id, findings, 'report', (msg) => req.log.warn(msg));
 
-    return { ok: true, inventoryIntervalMin: INVENTORY_INTERVAL_MIN };
+    const script = config.agentAutoUpdate ? await agentScript() : null;
+    const agentUpdate =
+      script && script.version !== snapshot.agentVersion ? { version: script.version, sha256: script.sha256 } : undefined;
+    return { ok: true, inventoryIntervalMin: INVENTORY_INTERVAL_MIN, agentUpdate };
+  });
+
+  // Téléchargement du script agent par un agent authentifié (mise à jour automatique).
+  app.get('/api/agent/script', async (req, reply) => {
+    const server = await authAgent(req);
+    if (!server) return reply.code(401).send({ error: 'Jeton invalide' });
+    const script = config.agentAutoUpdate ? await agentScript() : null;
+    if (!script) return reply.code(404).send({ error: 'Mise à jour automatique désactivée' });
+    return reply.type('application/octet-stream').header('cache-control', 'no-store').send(script.body);
   });
 }

@@ -21,13 +21,51 @@ interface ServerRow {
   inventory_at: Date | null;
   crit: number;
   warn: number;
+  open_rules: { rule: string; severity: 'warning' | 'critical' }[] | null;
+}
+
+type Light = 'ok' | 'warning' | 'critical' | 'na';
+
+// Voyants de santé : chaque alerte ouverte allume la catégorie de sa règle.
+// Ordre d'affichage = ordre de ce tableau.
+const HEALTH_GROUPS: { key: string; label: string; prefixes: string[] }[] = [
+  { key: 'agent', label: 'Agent', prefixes: ['offline', 'agent:'] },
+  { key: 'system', label: 'Système', prefixes: ['cpu', 'mem', 'disk:'] },
+  { key: 'services', label: 'Services', prefixes: ['service:', 'restart:', 'db'] },
+  { key: 'web', label: 'Web', prefixes: ['http', 'web', 'apache:'] },
+  { key: 'queues', label: 'Files', prefixes: ['queue:'] },
+  { key: 'dump', label: 'Dump', prefixes: ['backup'] },
+  { key: 'veeam', label: 'Veeam', prefixes: ['veeam:'] },
+  { key: 'certs', label: 'SSL', prefixes: ['cert:'] },
+];
+
+function matches(rule: string, prefix: string): boolean {
+  return prefix.endsWith(':') ? rule.startsWith(prefix) : rule === prefix || rule.startsWith(`${prefix}:`);
+}
+
+function health(r: ServerRow): { key: string; label: string; state: Light }[] {
+  const rules = r.open_rules ?? [];
+  return HEALTH_GROUPS.map((g) => {
+    const hits = rules.filter((a) => g.prefixes.some((p) => matches(a.rule, p)));
+    let state: Light = hits.some((a) => a.severity === 'critical') ? 'critical' : hits.length ? 'warning' : 'ok';
+    // Sans donnée pour la catégorie : voyant éteint plutôt que vert trompeur.
+    if (state === 'ok') {
+      if (!r.last_seen) state = 'na';
+      else if (g.key === 'veeam' && !r.snapshot?.veeam) state = 'na';
+      else if (g.key === 'dump' && !r.snapshot?.backup) state = 'na';
+      else if (g.key === 'certs' && !r.inventory?.certificates?.length) state = 'na';
+    }
+    return { key: g.key, label: g.label, state };
+  });
 }
 
 const SERVER_SELECT = `
   SELECT s.id, s.hostname, s.display_name, s.client_id, c.name AS client_name, s.rustdesk_id, s.notes,
          s.enrolled_at, s.last_seen, s.last_ip, s.agent_version, s.snapshot, s.inventory, s.inventory_at,
          (SELECT count(*)::int FROM alerts a WHERE a.server_id = s.id AND a.closed_at IS NULL AND a.severity = 'critical') AS crit,
-         (SELECT count(*)::int FROM alerts a WHERE a.server_id = s.id AND a.closed_at IS NULL AND a.severity = 'warning') AS warn
+         (SELECT count(*)::int FROM alerts a WHERE a.server_id = s.id AND a.closed_at IS NULL AND a.severity = 'warning') AS warn,
+         (SELECT json_agg(json_build_object('rule', a.rule, 'severity', a.severity)) FROM alerts a
+           WHERE a.server_id = s.id AND a.closed_at IS NULL) AS open_rules
     FROM servers s LEFT JOIN clients c ON c.id = s.client_id`;
 
 function status(r: ServerRow): 'pending' | 'offline' | 'critical' | 'warning' | 'ok' {
@@ -65,6 +103,9 @@ function summary(r: ServerRow) {
     },
     windowsUpdatesPending: r.inventory?.windowsUpdates?.pending ?? null,
     alerts: { critical: r.crit, warning: r.warn },
+    health: health(r),
+    veeamAgeHours: r.snapshot?.veeam?.okAgeHours ?? null,
+    uptimeHours: m.uptimeHours ?? null,
     rustdeskId: r.rustdesk_id,
     agentVersion: r.agent_version,
   };

@@ -41,6 +41,11 @@ export const config = {
   // Préfixe de publication derrière un proxy partagé (ex. Tailscale Funnel : /ezgedcc). Vide = racine.
   basePath: normalizeBasePath(env.BASE_PATH ?? ''),
 
+  // Mise à jour automatique des agents (opt-in) : la console propose le script agent/ezged-cc-agent.ps1
+  // qu'elle embarque. Attention : la console peut alors faire exécuter du code (SYSTEM) sur tout le parc.
+  agentAutoUpdate: env.AGENT_AUTO_UPDATE === '1',
+  agentScript: env.AGENT_SCRIPT ?? '',
+
   offlineMinutes: num('OFFLINE_MINUTES', 5),
   retentionDays: num('RETENTION_DAYS', 30),
 

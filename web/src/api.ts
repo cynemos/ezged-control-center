@@ -53,6 +53,16 @@ export interface ServerSummary {
   alerts: { critical: number; warning: number };
   rustdeskId: string | null;
   agentVersion: string | null;
+  health: HealthLight[];
+  veeamAgeHours: number | null;
+  uptimeHours: number | null;
+}
+
+export type LightState = 'ok' | 'warning' | 'critical' | 'na';
+export interface HealthLight {
+  key: string;
+  label: string;
+  state: LightState;
 }
 
 export interface AlertRow {
