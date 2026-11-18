@@ -1,0 +1,49 @@
+# Construit le paquet Windows de la console et le publie en release GitHub à chaque tag v*.
+# Sur le serveur, update-console.ps1 installe la dernière release après contrôle SHA256.
+name: Paquet console Windows
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Dépendances
+        run: |
+          npm ci --prefix server --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+
+      - name: Construction du paquet
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File deploy\windows\build-package.ps1 -Version "${{ github.ref_name }}"
+
+      - name: Empreinte SHA256
+        shell: powershell
+        run: |
+          $h = (Get-FileHash dist-package\ezgedcc-console.zip -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path dist-package\ezgedcc-console.zip.sha256 -Value "$h  ezgedcc-console.zip" -Encoding ASCII
+
+      - name: Publication de la release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist-package/ezgedcc-console.zip dist-package/ezgedcc-console.zip.sha256 --title "EzGed ControlCenter ${{ github.ref_name }}" --generate-notes
+
+      - name: Paquet en artefact (lancement manuel)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ezgedcc-console
+          path: dist-package/ezgedcc-console.zip*

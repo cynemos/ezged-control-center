@@ -111,6 +111,7 @@ if (Test-Path $EnvFile) { $keepEnv = [IO.File]::ReadAllText($EnvFile) }
 if (Test-Path $AppDir) { Remove-Item $AppDir -Recurse -Force }
 Copy-Item (Join-Path $Src 'app') $AppDir -Recurse
 Copy-Item (Join-Path $Src 'run-console.ps1') $InstallDir -Force
+if (Test-Path (Join-Path $Src 'update-console.ps1')) { Copy-Item (Join-Path $Src 'update-console.ps1') $InstallDir -Force }
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir 'agent') | Out-Null
 Copy-Item (Join-Path $Src 'agent\*.ps1') (Join-Path $InstallDir 'agent') -Force
 if (Test-Path (Join-Path $Src 'VERSION.txt')) { Copy-Item (Join-Path $Src 'VERSION.txt') $InstallDir -Force }
