@@ -56,8 +56,9 @@ New-Item -ItemType Directory -Path $work | Out-Null
 $zip = Join-Path $work 'ezgedcc-console.zip'
 Write-Host "Telechargement de $($zipAsset.browser_download_url)"
 Invoke-WebRequest -Uri $zipAsset.browser_download_url -Headers @{ 'User-Agent' = 'ezgedcc-updater' } -OutFile $zip -UseBasicParsing
-$expected = ((Invoke-WebRequest -Uri $shaAsset.browser_download_url -Headers @{ 'User-Agent' = 'ezgedcc-updater' } -UseBasicParsing).Content |
-    ForEach-Object { if ($_ -is [byte[]]) { [Text.Encoding]::ASCII.GetString($_) } else { $_ } }).Trim().Split(' ')[0].ToLower()
+$shaFile = Join-Path $work 'ezgedcc-console.zip.sha256'
+Invoke-WebRequest -Uri $shaAsset.browser_download_url -Headers @{ 'User-Agent' = 'ezgedcc-updater' } -OutFile $shaFile -UseBasicParsing
+$expected = ((Get-Content $shaFile -Raw).Trim() -split '\s+')[0].ToLower()
 $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
 if ($actual -ne $expected) { throw "Empreinte SHA256 differente : attendue $expected, obtenue $actual. Installation annulee." }
 Write-Host "Empreinte SHA256 verifiee : $actual"
