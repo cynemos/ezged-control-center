@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { createSession, requireUser, safeEqual, SESSION_COOKIE, verifyTotp } from '../auth.js';
 import { config } from '../config.js';
 import type { Db } from '../db.js';
+import { normalizeSnapshot } from '../normalize.js';
 import type { Inventory, Snapshot } from '../types.js';
 
 interface ServerRow {
@@ -180,7 +181,7 @@ export function apiRoutes(app: FastifyInstance, db: Db) {
         enrolledAt: row.enrolled_at,
         lastIp: row.last_ip,
         inventoryAt: row.inventory_at,
-        snapshot: row.snapshot,
+        snapshot: normalizeSnapshot(row.snapshot),
         inventory: row.inventory,
         alertList: alerts,
         versionHistory,

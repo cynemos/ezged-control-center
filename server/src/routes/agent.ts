@@ -7,6 +7,7 @@ import { evaluate, syncAlerts } from '../alerts.js';
 import { newToken, safeEqual, sha256 } from '../auth.js';
 import { config } from '../config.js';
 import type { Db } from '../db.js';
+import { normalizeSnapshot } from '../normalize.js';
 import type { AgentReport, Inventory } from '../types.js';
 
 const INVENTORY_INTERVAL_MIN = 60;
@@ -126,7 +127,8 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
     if (!server) return reply.code(401).send({ error: 'Jeton invalide' });
 
     const body = req.body ?? {};
-    const { inventory, ...snapshot } = body;
+    const { inventory, ...rawSnapshot } = body;
+    const snapshot = normalizeSnapshot(rawSnapshot);
     const m = snapshot.metrics ?? {};
     const diskMax = Math.max(0, ...(m.disks ?? []).map((d) => d.usedPct ?? 0));
     const queueTotal = Object.values(snapshot.queues ?? {}).reduce((a, q) => a + (q.count ?? 0), 0);

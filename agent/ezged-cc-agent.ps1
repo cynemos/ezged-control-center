@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.3.0'
+$AgentVersion = '0.3.1'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -317,7 +317,8 @@ function Get-VeeamState {
 #   Ntfs 55/98/137 = corruption du systeme de fichiers.
 function Get-EventHealth {
   $since = (Get-Date).AddHours(-24)
-  $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 6008, 1001, 7, 51, 153, 157, 55, 98, 137; StartTime = $since } -MaxEvents 500 -ErrorAction SilentlyContinue)
+  # Niveaux 1-3 seulement (critique, erreur, avertissement) : Ntfs 98 existe aussi en information ("volume sain").
+  $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 6008, 1001, 7, 51, 153, 157, 55, 98, 137; Level = 1, 2, 3; StartTime = $since } -MaxEvents 500 -ErrorAction SilentlyContinue)
   $kinds = @{ shutdown = 0; bugcheck = 0; disk = 0; ntfs = 0 }
   $last = @()
   foreach ($e in $events) {
@@ -707,7 +708,7 @@ $report = [ordered]@{
   db            = Invoke-Safe 'db' { Get-DbState }
   pendingReboot = Get-Cached 'reboot' 10 { Test-PendingReboot }
   events        = Get-Cached 'events' 15 { Get-EventHealth }
-  disksHealth   = @(Get-Cached 'diskHealth' 60 { Get-DiskHealth }) | Where-Object { $_ }
+  disksHealth   = @(@(Get-Cached 'diskHealth' 60 { Get-DiskHealth }) | Where-Object { $_ })
   logs          = Get-Cached 'logs' 15 { Get-LogErrors }
 }
 if ($report.backup) { $report.backup.ageHours = Get-AgeHours $report.backup.lastAt }
