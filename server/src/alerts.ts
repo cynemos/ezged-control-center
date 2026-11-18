@@ -18,6 +18,7 @@ export const THRESHOLDS = {
   memWarnPct: 95,
   cpuWarnPct: 90, // moyenne des 5 dernières mesures
   agentSlowMs: 45_000, // collecte anormalement longue (la tâche est coupée à 5 min)
+  agentSlowInventoryMs: 180_000, // idem avec l'inventaire horaire (Windows Update lent sur 2008 R2 / 2012)
   processRestartMinutes: 15, // service redémarré récemment
   backupWarnHours: 26,
   backupCritHours: 50,
@@ -86,7 +87,7 @@ export function evaluate(snap: Snapshot, inv: Inventory | null, recentCpu: numbe
       severity: 'warning',
       message: `Agent : collecte en échec (${ag.errors.map((e) => e.name).join(', ')}) – ${ag.errors[0].error}`,
     });
-  if (ag?.durationMs && ag.durationMs >= THRESHOLDS.agentSlowMs)
+  if (ag?.durationMs && ag.durationMs >= (ag.inventory ? THRESHOLDS.agentSlowInventoryMs : THRESHOLDS.agentSlowMs))
     out.push({ rule: 'agent:slow', severity: 'warning', message: `Agent : collecte lente (${Math.round(ag.durationMs / 1000)} s)` });
 
   for (const h of snap.apache ?? []) {

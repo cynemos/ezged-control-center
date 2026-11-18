@@ -74,7 +74,7 @@ export interface Snapshot {
   /** Processus des services surveillés (somme par exécutable). cpuPct null au premier rapport. */
   processes?: ProcessInfo[];
   /** Santé de l'agent lui-même. */
-  agent?: { durationMs?: number; errors?: { name: string; error: string }[]; ps?: string; dotnet?: number | null; autoUpdate?: boolean };
+  agent?: { durationMs?: number; inventory?: boolean; errors?: { name: string; error: string }[]; ps?: string; dotnet?: number | null; autoUpdate?: boolean };
   /** Veeam Agent for Windows, absent (null) si non installé. */
   veeam?: VeeamInfo | null;
   queues?: Record<string, QueueInfo>;

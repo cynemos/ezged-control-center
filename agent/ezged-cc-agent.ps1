@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.2.2'
+$AgentVersion = '0.2.3'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -598,6 +598,8 @@ if ($inventoryDue) {
 # Sante de l'agent : duree de collecte, collectes en echec, environnement d'execution.
 $report.agent = [ordered]@{
   durationMs = [int]$script:Clock.ElapsedMilliseconds
+  # Rapport avec inventaire : bien plus long (recherche Windows Update), jugé avec un autre seuil.
+  inventory  = [bool]$report.inventory
   errors     = @($script:CollectErrors)
   ps         = $PSVersionTable.PSVersion.ToString()
   dotnet     = Invoke-Safe 'dotnet' { [int](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release).Release }
