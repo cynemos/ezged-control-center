@@ -149,6 +149,17 @@ Depuis la page **Ajouter un serveur** de la console : copier le dossier `agent\`
 powershell -ExecutionPolicy Bypass -File .\install-agent.ps1 -ServerUrl https://ezged-cc.mondomaine.fr -EnrollKey <clé>
 ```
 
+### Déploiement par script (TeamViewer Remote Management, GPO...)
+
+Sur la page **Ajouter un serveur**, la section « Déploiement par script » génère un script PowerShell de quelques lignes : à enregistrer dans TeamViewer (Remote Management, Scripts, type PowerShell, « Exécuter en tant qu'administrateur ») puis à lancer sur un groupe d'appareils. Le script télécharge l'installeur et l'agent depuis `/api/agent/bootstrap` et lance `install-agent.ps1 -DeployToken`. Il ne contient pas la clé d'enrôlement mais un jeton de déploiement :
+
+- valable 1 à 30 jours et pour un nombre limité d'installations (1 à 500), révocable à tout moment ;
+- affiché une seule fois, la console n'en garde que l'empreinte ; la liste des jetons indique les serveurs enregistrés avec chacun ;
+- passé en en-tête HTTP (`X-Deploy-Token`) pour ne pas apparaître dans les journaux d'accès ;
+- relancé sur un serveur déjà équipé, le script met l'agent à jour sans consommer d'installation.
+
+Tant qu'il est actif, le jeton permet d'enregistrer un serveur dans la console : le garder court et le révoquer une fois le déploiement terminé. Un 2008 R2 sans TLS 1.2 activé dans SChannel ne peut pas télécharger le script : l'installer une première fois à la main (l'installeur active TLS 1.2).
+
 Mise à jour des agents : avec `AGENT_AUTO_UPDATE=1` dans le `.env` de la console, chaque agent plus ancien télécharge le script embarqué par la console, vérifie son empreinte SHA256 et sa syntaxe, puis se remplace ; la nouvelle version tourne à la minute suivante. Activer cette option donne à la console le pouvoir d'exécuter du code en SYSTEM sur tout le parc : la protéger en conséquence (mot de passe fort, double authentification). `-NoAutoUpdate` à l'installation refuse ces mises à jour sur un serveur.
 
 Si les documents ne sont pas dans le `stockagesdir` de `instance.conf` (stockage déclaré dans l'administration EzGED), passer `-DocsDir E:\ged` à l'installeur : relancé sur un serveur déjà enregistré, il garde son jeton.

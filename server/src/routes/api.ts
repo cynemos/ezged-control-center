@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { createSession, requireUser, safeEqual, SESSION_COOKIE, verifyTotp } from '../auth.js';
+import { createSession, newToken, requireUser, safeEqual, SESSION_COOKIE, sha256, verifyTotp } from '../auth.js';
+import { launcherScript } from '../deploy.js';
 import { config } from '../config.js';
 import type { Db } from '../db.js';
 import { normalizeSnapshot } from '../normalize.js';
@@ -276,5 +278,45 @@ export function apiRoutes(app: FastifyInstance, db: Db) {
     });
 
     priv.get('/api/enroll-info', async () => ({ publicUrl: config.publicUrl, enrollKey: config.enrollKey }));
+
+    // ---- Jetons de déploiement (installation de l'agent par TeamViewer, GPO...) ----
+    priv.get('/api/deploy-tokens', async () =>
+      db.query(
+        `SELECT t.id, t.label, t.created_at AS "createdAt", t.expires_at AS "expiresAt", t.max_uses AS "maxUses", t.uses,
+                t.revoked_at AS "revokedAt",
+                COALESCE((SELECT json_agg(json_build_object('id', s.id, 'name', COALESCE(s.display_name, s.hostname)) ORDER BY s.enrolled_at)
+                            FROM servers s WHERE s.deploy_token_id = t.id), '[]') AS servers
+           FROM deploy_tokens t ORDER BY t.created_at DESC LIMIT 50`,
+      ),
+    );
+
+    priv.post<{ Body: { label?: string; days?: number; maxUses?: number } }>('/api/deploy-tokens', async (req, reply) => {
+      const label = String(req.body?.label ?? '').trim().slice(0, 80);
+      const days = Math.round(Number(req.body?.days ?? 1));
+      const maxUses = Math.round(Number(req.body?.maxUses ?? 1));
+      if (!label) return reply.code(400).send({ error: 'Libellé manquant' });
+      if (!(days >= 1 && days <= 30)) return reply.code(400).send({ error: 'Durée : 1 à 30 jours' });
+      if (!(maxUses >= 1 && maxUses <= 500)) return reply.code(400).send({ error: "Nombre d'installations : 1 à 500" });
+      const token = newToken();
+      const id = randomUUID();
+      const expiresAt = new Date(Date.now() + days * 86_400_000);
+      await db.query('INSERT INTO deploy_tokens (id, token_hash, label, expires_at, max_uses) VALUES ($1, $2, $3, $4, $5)', [
+        id,
+        sha256(token),
+        label,
+        expiresAt,
+        maxUses,
+      ]);
+      req.log.info({ id, label, days, maxUses }, 'Jeton de déploiement créé');
+      // Le jeton n'est montré qu'ici : seule son empreinte est conservée.
+      return { id, script: launcherScript(token, label, expiresAt) };
+    });
+
+    priv.post<{ Params: { id: string } }>('/api/deploy-tokens/:id/revoke', async (req, reply) => {
+      if (!UUID_RE.test(req.params.id)) return reply.code(400).send({ error: 'id invalide' });
+      await db.query('UPDATE deploy_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL', [req.params.id]);
+      req.log.info({ id: req.params.id }, 'Jeton de déploiement révoqué');
+      return { ok: true };
+    });
   });
 }

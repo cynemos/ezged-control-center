@@ -68,6 +68,20 @@ ALTER TABLE servers ADD COLUMN IF NOT EXISTS machine_id TEXT;
 -- Jours avant disque plein (tendance de disk_max sur 7 jours), recalculé au plus tous les quarts d'heure.
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS disk_full_days REAL;
 CREATE UNIQUE INDEX IF NOT EXISTS servers_machine_id ON servers (machine_id) WHERE machine_id IS NOT NULL;
+
+-- Jetons de déploiement (script TeamViewer, GPO...) : durée et nombre d'installations limités, révocables.
+CREATE TABLE IF NOT EXISTS deploy_tokens (
+  id          UUID PRIMARY KEY,
+  token_hash  TEXT NOT NULL UNIQUE,
+  label       TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at  TIMESTAMPTZ NOT NULL,
+  max_uses    INTEGER NOT NULL,
+  uses        INTEGER NOT NULL DEFAULT 0,
+  revoked_at  TIMESTAMPTZ
+);
+-- Jeton de déploiement ayant servi à enregistrer le serveur (traçabilité).
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS deploy_token_id UUID;
 `;
 
 export async function openDb(): Promise<Db> {

@@ -7,6 +7,7 @@ import { evaluate, syncAlerts } from '../alerts.js';
 import { newToken, safeEqual, sha256 } from '../auth.js';
 import { config } from '../config.js';
 import type { Db } from '../db.js';
+import { bootstrapScript, consumeDeployToken, deployTokenValid } from '../deploy.js';
 import { normalizeSnapshot } from '../normalize.js';
 import type { AgentReport, Inventory } from '../types.js';
 
@@ -82,26 +83,34 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
     return row ?? null;
   }
 
-  // Enregistrement : l'installeur échange la clé d'enrôlement contre un jeton propre au serveur.
+  // Enregistrement : l'installeur échange la clé d'enrôlement, ou un jeton de déploiement,
+  // contre un jeton propre au serveur.
   // Si la machine est déjà connue (même MachineGuid), sa fiche et son historique sont conservés
   // et seul le jeton est renouvelé : l'ancien jeton cesse de fonctionner.
-  app.post<{ Body: { enrollKey?: string; hostname?: string; rustdeskId?: string; machineId?: string } }>(
+  app.post<{ Body: { enrollKey?: string; deployToken?: string; hostname?: string; rustdeskId?: string; machineId?: string } }>(
     '/api/agent/enroll',
     { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
     async (req, reply) => {
-      const { enrollKey = '', hostname = '', rustdeskId, machineId } = req.body ?? {};
-      if (!safeEqual(enrollKey, config.enrollKey)) return reply.code(403).send({ error: "Clé d'enrôlement invalide" });
+      const { enrollKey = '', deployToken = '', hostname = '', rustdeskId, machineId } = req.body ?? {};
       const name = String(hostname).trim().slice(0, 100);
       if (!name) return reply.code(400).send({ error: 'hostname manquant' });
+      let deployId: string | null = null;
+      if (deployToken) {
+        deployId = await consumeDeployToken(db, String(deployToken));
+        if (!deployId) return reply.code(403).send({ error: 'Jeton de déploiement invalide, expiré, révoqué ou épuisé' });
+      } else if (!safeEqual(enrollKey, config.enrollKey)) {
+        return reply.code(403).send({ error: "Clé d'enrôlement invalide" });
+      }
       const machine = machineId ? String(machineId).trim().toLowerCase().slice(0, 64) || null : null;
       const rustdesk = rustdeskId ? String(rustdeskId).slice(0, 50) : null;
 
       const token = newToken();
       if (machine) {
         const [known] = await db.query<{ id: string }>(
-          `UPDATE servers SET token_hash = $2, hostname = $3, rustdesk_id = COALESCE($4, rustdesk_id)
+          `UPDATE servers SET token_hash = $2, hostname = $3, rustdesk_id = COALESCE($4, rustdesk_id),
+                  deploy_token_id = COALESCE($5, deploy_token_id)
             WHERE machine_id = $1 RETURNING id`,
-          [machine, sha256(token), name, rustdesk],
+          [machine, sha256(token), name, rustdesk, deployId],
         );
         if (known) {
           req.log.info({ id: known.id, hostname: name }, 'Agent réenrôlé, fiche existante conservée');
@@ -110,17 +119,26 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
       }
 
       const id = randomUUID();
-      await db.query('INSERT INTO servers (id, hostname, token_hash, rustdesk_id, machine_id) VALUES ($1, $2, $3, $4, $5)', [
-        id,
-        name,
-        sha256(token),
-        rustdesk,
-        machine,
-      ]);
-      req.log.info({ id, hostname: name }, 'Agent enrôlé');
+      await db.query(
+        'INSERT INTO servers (id, hostname, token_hash, rustdesk_id, machine_id, deploy_token_id) VALUES ($1, $2, $3, $4, $5, $6)',
+        [id, name, sha256(token), rustdesk, machine, deployId],
+      );
+      req.log.info({ id, hostname: name, deployToken: deployId }, 'Agent enrôlé');
       return { serverId: id, token, reused: false };
     },
   );
+
+  // Script d'installation pour un déploiement par outil tiers : le jeton est passé en en-tête
+  // (X-Deploy-Token) pour ne pas finir dans les journaux d'accès. Il n'est consommé qu'à l'enregistrement.
+  app.get('/api/agent/bootstrap', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const token = String(req.headers['x-deploy-token'] ?? '').trim();
+    if (!(await deployTokenValid(db, token))) {
+      return reply.code(403).type('text/plain').send("throw 'Jeton de deploiement EzGed ControlCenter invalide, expire, revoque ou epuise'");
+    }
+    const script = await bootstrapScript(token);
+    if (!script) return reply.code(500).type('text/plain').send("throw 'Scripts agent introuvables sur la console'");
+    return reply.type('text/plain; charset=utf-8').header('cache-control', 'no-store').send(script);
+  });
 
   app.post<{ Body: AgentReport }>('/api/agent/report', { bodyLimit: 1024 * 1024 }, async (req, reply) => {
     const server = await authAgent(req);

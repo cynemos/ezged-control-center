@@ -6,6 +6,9 @@
   Exemple :
     powershell -ExecutionPolicy Bypass -File install-agent.ps1 -ServerUrl https://ezged-cc.mondomaine.fr -EnrollKey XXXX
 
+  Deploiement par script (TeamViewer, GPO...) : -DeployToken remplace -EnrollKey. Le script genere
+  par la console (page Ajouter un serveur) telecharge cet installeur et le lance avec ce jeton.
+
   Optionnel :
     -NchpRoot D:\nchp           racine EzGED (sinon detectee : X:\nchp sur les disques locaux)
     -BackupDir E:\sauvegardes   dossier des dumps (sinon recherche : nchp\save_dump(s), nchpdata\..., X:\dumps)
@@ -18,7 +21,9 @@
 #>
 param(
   [Parameter(Mandatory = $true)][string]$ServerUrl,
-  [Parameter(Mandatory = $true)][string]$EnrollKey,
+  # L'un des deux : cle d'enrolement de la console, ou jeton de deploiement (duree et usages limites).
+  [string]$EnrollKey,
+  [string]$DeployToken,
   [string]$NchpRoot,
   [string]$BackupDir,
   [string]$DocsDir,
@@ -40,6 +45,9 @@ function Stop-Install([string]$Message) {
 }
 
 # ---------------------------------------------------------------- 0. pre-controles
+if (-not $EnrollKey -and -not $DeployToken) {
+  Stop-Install 'indiquer -EnrollKey (cle d''enrolement) ou -DeployToken (jeton de deploiement).'
+}
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
   Stop-Install 'lancer ce script dans un PowerShell "Executer en tant qu''administrateur".'
@@ -149,9 +157,14 @@ if ($existing -and $existing.tokenProtected -and -not $Reenroll) {
   # MachineGuid : identifie la machine pour que la console reutilise sa fiche en cas de reinstallation
   $machineId = $null
   try { $machineId = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid).MachineGuid } catch { }
-  $body = @{ enrollKey = $EnrollKey; hostname = $env:COMPUTERNAME; rustdeskId = $RustDeskId; machineId = $machineId } | ConvertTo-Json
-  $resp = Invoke-RestMethod -Method Post -Uri "$ServerUrl/api/agent/enroll" `
-    -ContentType 'application/json' -Body $body -TimeoutSec 30 @Basic
+  $body = @{ hostname = $env:COMPUTERNAME; rustdeskId = $RustDeskId; machineId = $machineId }
+  if ($DeployToken) { $body.deployToken = $DeployToken } else { $body.enrollKey = $EnrollKey }
+  try {
+    $resp = Invoke-RestMethod -Method Post -Uri "$ServerUrl/api/agent/enroll" `
+      -ContentType 'application/json' -Body ($body | ConvertTo-Json) -TimeoutSec 30 @Basic
+  } catch {
+    Stop-Install "enregistrement refuse par la console : $($_.Exception.Message) (cle ou jeton invalide, expire ou epuise ?)"
+  }
   $serverId = $resp.serverId
   $tokenProtected = Protect-Secret $resp.token
   if ($resp.reused) { Write-Host "Serveur deja connu de la console, fiche conservee : $serverId" }

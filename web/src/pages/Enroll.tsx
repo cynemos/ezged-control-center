@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Card } from '../components/ui';
+import DeployTokens from '../components/DeployTokens';
 import { usePoll } from '../hooks';
 
 export default function Enroll() {
@@ -34,6 +35,7 @@ export default function Enroll() {
           <li>Le serveur apparaît dans le parc sous une minute. Affectez-lui ensuite un client depuis sa fiche.</li>
         </ol>
       </Card>
+      <DeployTokens />
       <Card title="Options de l'installeur">
         <ul className="space-y-1.5 text-sm">
           <li><code>-NchpRoot D:\nchp</code> : racine EzGED si elle n'est pas dans <code>C:\nchp</code>.</li>
