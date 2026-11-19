@@ -112,6 +112,7 @@ function summary(r: ServerRow) {
     uptimeHours: m.uptimeHours ?? null,
     diskFullDays: r.disk_full_days === null ? null : Math.round(r.disk_full_days),
     rustdeskId: r.rustdesk_id,
+    teamviewerId: r.snapshot?.teamviewerId ? String(r.snapshot.teamviewerId).replace(/\D/g, '').slice(0, 15) || null : null,
     agentVersion: r.agent_version,
   };
 }

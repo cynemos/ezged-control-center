@@ -54,6 +54,8 @@ export interface VeeamInfo {
 export interface Snapshot {
   agentVersion?: string;
   hostname?: string;
+  /** Identifiant TeamViewer lu dans le registre (agent 0.3.2+). */
+  teamviewerId?: string | null;
   machineId?: string;
   collectedAt?: string;
   metrics?: {

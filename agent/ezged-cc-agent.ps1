@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.3.1'
+$AgentVersion = '0.3.2'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -271,6 +271,20 @@ function Get-BackupState {
 # Veeam Agent for Windows (optionnel) : service, version et resultat des taches lus dans le
 # journal 'Veeam Agent' (110 = tache demarree, 190 = tache terminee avec Success/Warning/Failed).
 # Renvoie $null si Veeam n'est pas installe.
+# Identifiant TeamViewer, lu dans le registre (installation 32 ou 64 bits, ou sous-cle VersionN des
+# anciennes versions). Sert au bouton de prise en main de la console.
+function Get-TeamViewerId {
+  foreach ($root in 'HKLM:\SOFTWARE\WOW6432Node\TeamViewer', 'HKLM:\SOFTWARE\TeamViewer') {
+    if (-not (Test-Path $root)) { continue }
+    $keys = @(Get-Item $root) + @(Get-ChildItem $root -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^Version\d+$' })
+    foreach ($k in $keys) {
+      $id = (Get-ItemProperty -Path $k.PSPath -Name ClientID -ErrorAction SilentlyContinue).ClientID
+      if ($id) { return [string]$id }
+    }
+  }
+  return $null
+}
+
 function Get-VeeamState {
   $svc = Get-Service -Name 'VeeamEndpointBackupSvc' -ErrorAction SilentlyContinue
   if (-not $svc) { return $null }
@@ -704,6 +718,7 @@ $report = [ordered]@{
   web           = if ($WebUrl) { Invoke-Safe 'web' { Test-Http $WebUrl -Strict } } else { $null }
   backup        = Get-Cached 'backup' 10 { Get-BackupState }
   veeam         = Get-Cached 'veeam' 5 { Get-VeeamState }
+  teamviewerId  = Get-Cached 'teamviewer' 60 { Get-TeamViewerId }
   queues        = Invoke-Safe 'queues' { Get-QueueStates }
   db            = Invoke-Safe 'db' { Get-DbState }
   pendingReboot = Get-Cached 'reboot' 10 { Test-PendingReboot }
@@ -724,7 +739,7 @@ if ($inventoryDue) {
 # Sante de l'agent : duree de collecte, collectes en echec, environnement d'execution.
 $report.agent = [ordered]@{
   durationMs = [int]$script:Clock.ElapsedMilliseconds
-  # Rapport avec inventaire : bien plus long (recherche Windows Update), jugé avec un autre seuil.
+  # Rapport avec inventaire : bien plus long (recherche Windows Update), juge avec un autre seuil.
   inventory  = [bool]$report.inventory
   errors     = @($script:CollectErrors)
   ps         = $PSVersionTable.PSVersion.ToString()

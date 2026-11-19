@@ -52,6 +52,7 @@ export interface ServerSummary {
   windowsUpdatesPending: number | null;
   alerts: { critical: number; warning: number };
   rustdeskId: string | null;
+  teamviewerId: string | null;
   agentVersion: string | null;
   health: HealthLight[];
   veeamAgeHours: number | null;

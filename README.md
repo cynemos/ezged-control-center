@@ -32,6 +32,7 @@ Chaque minute :
 - toutes les 5 à 15 min (résultat gardé en cache et renvoyé entre deux calculs) : dernier dump, Veeam, redémarrage en attente, liste des ports Apache ;
 - toutes les 15 min : journal Système des dernières 24 h (écrans bleus, arrêts inattendus, erreurs disque et NTFS), erreurs des journaux Apache et MariaDB des dernières 24 h ;
 - toutes les heures : santé des disques physiques (prédiction de panne SMART, état Windows à partir de 2012 ; souvent invisible derrière un RAID ou dans une VM) ;
+- toutes les heures : identifiant TeamViewer (registre). La fiche du serveur affiche alors un bouton « Prendre la main (TeamViewer) » qui ouvre le client TeamViewer du poste sur ce serveur et copie l'ID ; l'accès sans utilisateur suppose que le serveur soit dans la liste d'ordinateurs du compte TeamViewer ;
 - santé de l'agent : durée de collecte, collectes en échec, versions de PowerShell et .NET ;
 - files `enqueued`, `wait`, `ocr`, `convd`, `pdf2txt`, `ps2pdf` (nombre de fichiers, âge du plus ancien) ;
 - compteurs MariaDB si un compte de supervision est configuré.

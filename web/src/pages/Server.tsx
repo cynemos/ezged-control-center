@@ -65,14 +65,14 @@ export default function Server() {
             <span>Agent {s.agentVersion ?? '?'}</span>
           </div>
         </div>
-        <div className="ml-auto flex gap-2">
-          {s.rustdeskId ? (
+        <div className="ml-auto flex flex-wrap gap-2">
+          {s.teamviewerId && <TeamViewerButton id={s.teamviewerId} />}
+          {s.rustdeskId && (
             <a href={`rustdesk://${encodeURIComponent(s.rustdeskId)}`} className="rounded-md border border-accent bg-accent/90 px-3 py-1.5 text-sm text-white hover:bg-accent">
               Prendre la main (RustDesk)
             </a>
-          ) : (
-            <span className="self-center text-xs text-muted">Pas d'ID RustDesk</span>
           )}
+          {!s.teamviewerId && !s.rustdeskId && <span className="self-center text-xs text-muted">Pas d'ID TeamViewer ni RustDesk</span>}
           <Button onClick={() => setEditing(!editing)}>Modifier</Button>
           <Button variant="danger" onClick={() => setDeleting(true)}>Supprimer</Button>
         </div>
@@ -454,6 +454,28 @@ function Chart({ title, points, series, range, max }: { title: string; points: P
 }
 
 // Stockage des documents : taille, nombre de fichiers, date du calcul (quotidien côté agent).
+// Ouvre le client TeamViewer installé sur le poste (gestionnaire d'URL teamviewer10://) sur l'ID du serveur,
+// et copie l'ID au passage au cas où le lien ne serait pas pris en charge par la version installée.
+function TeamViewerButton({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const spaced = id.replace(/(\d{3})(?=\d)/g, '$1 ');
+  return (
+    <span className="flex items-center gap-2">
+      <a
+        href={`teamviewer10://control?device=${encodeURIComponent(id)}`}
+        onClick={() => {
+          navigator.clipboard?.writeText(id).then(() => setCopied(true), () => undefined);
+        }}
+        className="rounded-md border border-accent bg-accent/90 px-3 py-1.5 text-sm text-white hover:bg-accent"
+        title="Ouvre TeamViewer sur ce serveur (l'ID est aussi copié)"
+      >
+        Prendre la main (TeamViewer)
+      </a>
+      <span className="font-mono text-xs text-muted">{copied ? 'ID copié' : spaced}</span>
+    </span>
+  );
+}
+
 function Count({ n, crit = false }: { n: number; crit?: boolean }) {
   if (!n) return <span className="text-muted">0</span>;
   return <span className={crit ? 'font-medium text-crit' : 'font-medium text-warn'}>{n}</span>;
