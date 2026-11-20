@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { createSession, newToken, requireUser, safeEqual, SESSION_COOKIE, sha256, verifyTotp } from '../auth.js';
 import { launcherScript } from '../deploy.js';
+import { syncTeamViewer, tvStatus } from '../teamviewer.js';
 import { config } from '../config.js';
 import type { Db } from '../db.js';
 import { normalizeSnapshot } from '../normalize.js';
@@ -278,6 +279,12 @@ export function apiRoutes(app: FastifyInstance, db: Db) {
     });
 
     priv.get('/api/enroll-info', async () => ({ publicUrl: config.publicUrl, enrollKey: config.enrollKey }));
+
+    // ---- Synchronisation des noms TeamViewer ----
+    priv.get('/api/teamviewer', async () => ({ ...tvStatus, enabled: Boolean(config.teamviewerApiToken) }));
+    priv.post('/api/teamviewer/sync', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req) =>
+      syncTeamViewer(db, (msg) => req.log.warn(msg)),
+    );
 
     // ---- Jetons de déploiement (installation de l'agent par TeamViewer, GPO...) ----
     priv.get('/api/deploy-tokens', async () =>

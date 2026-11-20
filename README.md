@@ -160,6 +160,10 @@ Sur la page **Ajouter un serveur**, la section « Déploiement par script » gé
 
 Tant qu'il est actif, le jeton permet d'enregistrer un serveur dans la console : le garder court et le révoquer une fois le déploiement terminé. Un 2008 R2 sans TLS 1.2 activé dans SChannel ne peut pas télécharger le script : l'installer une première fois à la main (l'installeur active TLS 1.2).
 
+### Noms TeamViewer
+
+Avec `TEAMVIEWER_API_TOKEN` dans le `.env` (jeton de script créé dans la console web TeamViewer : profil, Apps, droit de lecture « Ordinateurs et contacts » uniquement), la console lit tous les quarts d'heure la liste des appareils du compte et retrouve chaque serveur par l'ID TeamViewer que remonte l'agent. Une fiche sans nom prend le nom de l'appareil TeamViewer ; une fiche sans client prend le client déduit de ce nom, sans les numéros de version en tête ni le dernier segment (« 4.1 - MAIRIE DE UR - new » donne « MAIRIE DE UR »). Ce qui a été saisi dans la console n'est jamais écrasé. État et synchronisation immédiate : page **Ajouter un serveur**.
+
 Mise à jour des agents : avec `AGENT_AUTO_UPDATE=1` dans le `.env` de la console, chaque agent plus ancien télécharge le script embarqué par la console, vérifie son empreinte SHA256 et sa syntaxe, puis se remplace ; la nouvelle version tourne à la minute suivante. Activer cette option donne à la console le pouvoir d'exécuter du code en SYSTEM sur tout le parc : la protéger en conséquence (mot de passe fort, double authentification). `-NoAutoUpdate` à l'installation refuse ces mises à jour sur un serveur.
 
 Si les documents ne sont pas dans le `stockagesdir` de `instance.conf` (stockage déclaré dans l'administration EzGED), passer `-DocsDir E:\ged` à l'installeur : relancé sur un serveur déjà enregistré, il garde son jeton.

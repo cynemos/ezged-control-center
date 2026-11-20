@@ -10,6 +10,7 @@ import { assertConfig, config } from './config.js';
 import { openDb } from './db.js';
 import { agentRoutes } from './routes/agent.js';
 import { apiRoutes } from './routes/api.js';
+import { syncTeamViewer } from './teamviewer.js';
 
 assertConfig();
 
@@ -63,6 +64,11 @@ const log = (msg: string) => app.log.warn(msg);
 
 // Détection des serveurs muets, toutes les minutes.
 setInterval(() => void checkOffline(db, log).catch((e) => app.log.error(e)), 60_000);
+
+// Noms TeamViewer des serveurs : au démarrage puis tous les quarts d'heure (sans jeton : rien).
+const tvSync = () => void syncTeamViewer(db, log).catch((e) => app.log.error(e));
+setTimeout(tvSync, 15_000);
+setInterval(tvSync, 15 * 60_000);
 
 // Purge quotidienne de l'historique.
 async function purge() {
