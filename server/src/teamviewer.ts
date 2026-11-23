@@ -32,20 +32,30 @@ export const tvStatus: TeamViewerStatus = {
   unmatched: [],
 };
 
+// Segment de numérotation en tête des noms TeamViewer : « 15 », « 3.5 », « k15 ».
+const VERSION = /^[a-z]?\d+(?:\.\d+)*$/i;
+
+/** Nom fait uniquement de numéros (« k15 - 3.4 ») : pas un vrai client. */
+export function isVersionOnly(name: string): boolean {
+  return name.split(/\s+-\s+/).every((p) => VERSION.test(p.trim()));
+}
+
 /**
- * Client déduit du nom TeamViewer : sans les numéros de version en tête ni le dernier segment
- * (VM, new...). « 15 - 3.4 - C3SM CLAIRA - VM TJP » donne « C3SM CLAIRA » ;
- * « 4.0 - MAIRIE DE GRAISSESSAC » donne « MAIRIE DE GRAISSESSAC ».
+ * Client déduit du nom TeamViewer : sans les parenthèses (fermées ou non), sans les numéros en tête
+ * ni le dernier segment (VM, new...). « 15 - 3.4 - C3SM CLAIRA - VM TJP » donne « C3SM CLAIRA » ;
+ * « k15 - 3.5 - DERRO » donne « DERRO » ; « k15 - 3.4 - MAITRE CHERORET (S8614 - 5XZMZY1 » donne
+ * « MAITRE CHERORET ».
  */
 export function clientFromAlias(alias: string): string | null {
   const parts = alias
+    .replace(/\s*\([^)]*\)?/g, ' ')
     .split(/\s+-\s+/)
     .map((p) => p.trim())
     .filter(Boolean);
-  while (parts.length > 1 && /^[\d.]+$/.test(parts[0])) parts.shift();
+  while (parts.length > 1 && VERSION.test(parts[0])) parts.shift();
   if (parts.length > 1) parts.pop();
-  const name = parts.join(' - ').trim();
-  return name && !/^[\d.]+$/.test(name) ? name.slice(0, 100) : null;
+  const name = parts.join(' - ').replace(/\s+/g, ' ').trim();
+  return name && !isVersionOnly(name) ? name.slice(0, 100) : null;
 }
 
 function digits(v: unknown): string {
@@ -72,9 +82,10 @@ async function managedDevices(path: string): Promise<{ teamviewerId?: number | s
   const out: { teamviewerId?: number | string; name?: string }[] = [];
   let token = '';
   for (let page = 0; page < 50; page++) {
-    const body = await tvGet<{ nextPaginationToken?: string; resources?: { teamviewerId?: number; name?: string }[] }>(
-      path + (token ? `?paginationToken=${encodeURIComponent(token)}` : ''),
-    );
+    const body = await tvGet<{
+      nextPaginationToken?: string;
+      resources?: { teamviewerId?: number; name?: string }[];
+    }>(path + (token ? `?paginationToken=${encodeURIComponent(token)}` : ''));
     out.push(...(body.resources ?? []));
     if (!body.nextPaginationToken || body.nextPaginationToken === token) break;
     token = body.nextPaginationToken;
@@ -93,7 +104,13 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
       if (k && a && !aliases.has(k)) aliases.set(k, a.slice(0, 200));
     };
     // « Ordinateurs et contacts » : source principale, une erreur ici arrête la synchronisation.
-    const body = await tvGet<{ devices?: { remotecontrol_id?: string; teamviewer_id?: number; alias?: string }[] }>('/devices');
+    const body = await tvGet<{
+      devices?: {
+        remotecontrol_id?: string;
+        teamviewer_id?: number;
+        alias?: string;
+      }[];
+    }>('/devices');
     for (const d of body.devices ?? []) {
       add(d.remotecontrol_id, d.alias);
       add(d.teamviewer_id, d.alias);
@@ -108,13 +125,21 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
         warnings.push((e as Error).message);
       }
     }
-    tvStatus.warning = warnings.length
+    const managedWarning = warnings.length
       ? `appareils gérés non lus (${warnings.join(' ; ')}) : ajouter au jeton le droit de lecture « Gestion des appareils »`
       : null;
 
-    const rows = await db.query<{ id: string; hostname: string; tv: string; display_name: string | null; client_id: number | null }>(
-      `SELECT id, hostname, snapshot->>'teamviewerId' AS tv, display_name, client_id
-         FROM servers WHERE snapshot->>'teamviewerId' IS NOT NULL`,
+    const rows = await db.query<{
+      id: string;
+      hostname: string;
+      tv: string;
+      display_name: string | null;
+      client_id: number | null;
+      client_name: string | null;
+    }>(
+      `SELECT s.id, s.hostname, s.snapshot->>'teamviewerId' AS tv, s.display_name, s.client_id, c.name AS client_name
+         FROM servers s LEFT JOIN clients c ON c.id = s.client_id
+        WHERE s.snapshot->>'teamviewerId' IS NOT NULL`,
     );
     let matched = 0;
     let updated = 0;
@@ -127,7 +152,9 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
       }
       matched++;
       let clientId: number | null = null;
-      const client = r.client_id === null ? clientFromAlias(alias) : null;
+      // Client fait uniquement de numéros (« k15 - 3.4 », déduit par la v0.4.4) : remplacé.
+      const badClient = r.client_name !== null && isVersionOnly(r.client_name);
+      const client = r.client_id === null || badClient ? clientFromAlias(alias) : null;
       if (client) {
         const [c] = await db.query<{ id: number }>(
           'INSERT INTO clients (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id',
@@ -137,13 +164,28 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
       }
       if (!r.display_name || clientId !== null) {
         await db.query(
-          `UPDATE servers SET display_name = COALESCE(display_name, $2), client_id = COALESCE(client_id, $3) WHERE id = $1`,
-          [r.id, alias, clientId],
+          `UPDATE servers SET display_name = COALESCE(display_name, $2),
+                  client_id = CASE WHEN $4::boolean THEN COALESCE($3, client_id) ELSE COALESCE(client_id, $3) END
+            WHERE id = $1`,
+          [r.id, alias, clientId, badClient],
         );
         updated++;
       }
     }
-    Object.assign(tvStatus, { lastSyncAt: new Date().toISOString(), error: null, devices: aliases.size, matched, updated, unmatched });
+    const orphans = await db.query<{ id: number; name: string }>(
+      'SELECT id, name FROM clients c WHERE NOT EXISTS (SELECT 1 FROM servers s WHERE s.client_id = c.id)',
+    );
+    for (const o of orphans) if (isVersionOnly(o.name)) await db.query('DELETE FROM clients WHERE id = $1', [o.id]);
+    Object.assign(tvStatus, {
+      lastSyncAt: new Date().toISOString(),
+      error: null,
+      devices: aliases.size,
+      matched,
+      updated,
+      unmatched,
+      // Le droit manquant ne gêne que si des serveurs restent introuvables.
+      warning: unmatched.length ? managedWarning : null,
+    });
   } catch (e) {
     tvStatus.lastSyncAt = new Date().toISOString();
     tvStatus.error = (e as Error).message;
