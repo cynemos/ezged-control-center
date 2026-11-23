@@ -81,12 +81,12 @@ export default function DeployTokens() {
         {error && <p className="text-crit">{error}</p>}
 
         {script && (
-          <div className="space-y-2 rounded-md border border-warn/50 bg-warn/5 p-3">
+          <div className="space-y-2 rounded-xl border border-warn/50 bg-warn/5 p-3">
             <p className="text-xs text-warn">
               Script affiché une seule fois : la console ne garde que l'empreinte du jeton. Tant qu'il est actif, ce script peut enregistrer un serveur :
               ne le diffusez pas et révoquez le jeton une fois le déploiement terminé.
             </p>
-            <pre className="overflow-x-auto rounded bg-panel-2 p-3 text-xs">{script}</pre>
+            <pre className="overflow-x-auto rounded-lg border border-line bg-black/30 p-3 text-xs">{script}</pre>
             <div className="flex gap-3 text-xs">
               <button className="text-accent" onClick={() => navigator.clipboard.writeText(script).then(() => setCopied(true))}>
                 {copied ? 'Copié' : 'Copier le script'}

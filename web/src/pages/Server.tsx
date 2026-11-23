@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api, type AlertRow, type ServerSummary } from '../api';
-import { Button, Card, Gauge, HealthLights, Kv, Pill, StatusDot } from '../components/ui';
+import { Button, Card, Gauge, HealthLights, Kv, Pill, Ring, STATUS_HEX, Segmented, StatusBadge } from '../components/ui';
 import { ago, bytes, dateTime, hours } from '../format';
 import { usePoll } from '../hooks';
 
@@ -49,51 +49,68 @@ export default function Server() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-start gap-4">
-        <div>
-          <Link to="/" className="text-sm text-muted hover:text-text">
-            ← Parc
-          </Link>
-          <h1 className="mt-1 text-xl font-semibold">
-            {s.name} <span className="text-sm font-normal text-muted">{s.client ?? 'client non affecté'}</span>
-          </h1>
-          <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-muted">
-            <StatusDot status={s.status} />
-            <span>Dernier contact {ago(s.lastSeen)}</span>
-            <span>{s.hostname}</span>
-            {s.lastIp && <span>IP {s.lastIp}</span>}
-            <span>Agent {s.agentVersion ?? '?'}</span>
+      <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted transition hover:text-text">
+        ← Parc
+      </Link>
+
+      <section className="glass relative animate-rise overflow-hidden rounded-2xl p-5">
+        <span
+          className={`absolute inset-x-0 top-0 h-[3px] ${s.status === 'critical' ? 'animate-glow' : ''}`}
+          style={{ background: `linear-gradient(90deg, transparent, ${STATUS_HEX[s.status]}, transparent)` }}
+        />
+        <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full blur-3xl" style={{ background: STATUS_HEX[s.status], opacity: 0.12 }} />
+        <div className="relative flex flex-wrap items-center gap-6">
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="text-[11px] font-medium uppercase tracking-wider text-muted">{s.client ?? 'client non affecté'}</div>
+            <h1 className="break-words text-2xl font-bold tracking-tight">{s.name}</h1>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted">
+              <StatusBadge status={s.status} />
+              <span>Dernier contact {ago(s.lastSeen)}</span>
+              <span>{s.hostname}</span>
+              {s.lastIp && <span>IP {s.lastIp}</span>}
+              <span>Agent {s.agentVersion ?? '?'}</span>
+            </div>
+            <div className="pt-1">
+              <HealthLights lights={s.health} size="md" />
+            </div>
+          </div>
+          <div className="flex items-center gap-4 rounded-xl border border-white/[0.05] bg-black/25 px-5 py-3">
+            <Ring label="CPU" value={m.cpu} size={72} stroke={6} />
+            <Ring label="RAM" value={m.memUsedPct} warn={85} crit={95} size={72} stroke={6} />
+            <Ring label="Disque" value={s.diskMax} warn={90} crit={95} size={72} stroke={6} />
           </div>
         </div>
-        <div className="ml-auto flex flex-wrap gap-2">
+        <div className="relative mt-4 flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-4">
           {s.teamviewerId && <TeamViewerButton id={s.teamviewerId} />}
           {s.rustdeskId && (
-            <a href={`rustdesk://${encodeURIComponent(s.rustdeskId)}`} className="rounded-md border border-accent bg-accent/90 px-3 py-1.5 text-sm text-white hover:bg-accent">
+            <a href={`rustdesk://${encodeURIComponent(s.rustdeskId)}`} className={REMOTE_BTN}>
               Prendre la main (RustDesk)
             </a>
           )}
-          {!s.teamviewerId && !s.rustdeskId && <span className="self-center text-xs text-muted">Pas d'ID TeamViewer ni RustDesk</span>}
-          <Button onClick={() => setEditing(!editing)}>Modifier</Button>
-          <Button variant="danger" onClick={() => setDeleting(true)}>Supprimer</Button>
+          {!s.teamviewerId && !s.rustdeskId && <span className="text-xs text-muted">Pas d'ID TeamViewer ni RustDesk</span>}
+          <span className="ml-auto flex gap-2">
+            <Button onClick={() => setEditing(!editing)}>Modifier</Button>
+            <Button variant="danger" onClick={() => setDeleting(true)}>
+              Supprimer
+            </Button>
+          </span>
         </div>
-      </div>
-
-      <HealthLights lights={s.health} size="md" />
+      </section>
 
       {deleting && <DeleteConfirm s={s} onCancel={() => setDeleting(false)} />}
 
       {editing && <EditForm s={s} onDone={() => { setEditing(false); void reload(); }} />}
 
       {s.alertList.some((a) => !a.closed_at) && (
-        <Card title="Alertes en cours">
-          <ul className="space-y-1.5">
+        <Card title="Alertes en cours" className="!border-crit/30">
+          <ul className="space-y-2">
             {s.alertList
               .filter((a) => !a.closed_at)
               .map((a) => (
-                <li key={a.id} className="flex items-center gap-3 text-sm">
+                <li key={a.id} className="flex items-center gap-3 rounded-lg bg-black/20 px-3 py-2 text-sm">
                   <Pill tone={a.severity === 'critical' ? 'crit' : 'warn'}>{a.severity === 'critical' ? 'Critique' : 'Alerte'}</Pill>
                   <span>{a.message}</span>
-                  <span className="text-xs text-muted">{ago(a.opened_at)}</span>
+                  <span className="ml-auto shrink-0 text-xs text-muted">{ago(a.opened_at)}</span>
                 </li>
               ))}
           </ul>
@@ -358,18 +375,12 @@ export default function Server() {
       <Card
         title="Historique"
         right={
-          <div className="flex gap-1">
-            {RANGES.map(([k, label]) => (
-              <button key={k} onClick={() => setRange(k)} className={`rounded px-2 py-0.5 text-xs ${range === k ? 'bg-panel-2 text-text' : 'text-muted'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
+          <Segmented size="sm" value={range} onChange={setRange} options={RANGES} />
         }
       >
         <div className="grid gap-6 lg:grid-cols-2">
-          <Chart title="CPU / RAM / disque (%)" points={points ?? []} range={range} series={[['cpu', 'CPU', '#4c9aff'], ['mem', 'RAM', '#a371f7'], ['disk_max', 'Disque max', '#d29922']]} max={100} />
-          <Chart title="Temps de réponse EzGED (ms)" points={points ?? []} range={range} series={[['http_ms', 'Réponse', '#3fb950']]} />
+          <Chart title="CPU / RAM / disque (%)" points={points ?? []} range={range} series={[['cpu', 'CPU', '#3987e5'], ['mem', 'RAM', '#d95926'], ['disk_max', 'Disque max', '#199e70']]} max={100} />
+          <Chart title="Temps de réponse EzGED (ms)" points={points ?? []} range={range} series={[['http_ms', 'Réponse', '#3987e5']]} />
         </div>
       </Card>
 
@@ -420,38 +431,66 @@ export default function Server() {
 function Chart({ title, points, series, range, max }: { title: string; points: Point[]; series: [keyof Point, string, string][]; range: string; max?: number }) {
   const fmt = (ts: string) =>
     new Date(ts).toLocaleString('fr-FR', range === '24h' ? { hour: '2-digit', minute: '2-digit' } : { day: '2-digit', month: '2-digit' });
+  const single = series.length === 1;
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-muted">
         <span className="font-medium text-text">{title}</span>
-        {series.map(([, label, color]) => (
-          <span key={label} className="inline-flex items-center gap-1">
-            <span className="inline-block h-0.5 w-3" style={{ background: color }} />
-            {label}
-          </span>
-        ))}
+        {!single &&
+          series.map(([, label, color]) => (
+            <span key={label} className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-0.5 w-3.5 rounded-full" style={{ background: color }} />
+              {label}
+            </span>
+          ))}
       </div>
       {points.length === 0 ? (
         <p className="py-10 text-center text-sm text-muted">Pas encore de données.</p>
       ) : (
-        <ResponsiveContainer width="100%" height={200}>
-          <LineChart data={points} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-            <CartesianGrid stroke="#2a3442" vertical={false} />
-            <XAxis dataKey="ts" tickFormatter={fmt} stroke="#8b98a8" fontSize={11} minTickGap={40} />
-            <YAxis stroke="#8b98a8" fontSize={11} domain={max ? [0, max] : ['auto', 'auto']} />
+        <ResponsiveContainer width="100%" height={210}>
+          <AreaChart data={points} margin={{ top: 6, right: 10, left: -12, bottom: 0 }}>
+            <defs>
+              {series.map(([key, , color]) => (
+                <linearGradient key={String(key)} id={`g-${String(key)}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={color} stopOpacity={single ? 0.35 : 0.14} />
+                  <stop offset="100%" stopColor={color} stopOpacity={0} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid stroke="rgb(255 255 255 / 0.05)" vertical={false} />
+            <XAxis dataKey="ts" tickFormatter={fmt} stroke="#8a9ab3" fontSize={11} minTickGap={40} tickLine={false} axisLine={{ stroke: '#20304b' }} />
+            <YAxis stroke="#8a9ab3" fontSize={11} domain={max ? [0, max] : ['auto', 'auto']} tickLine={false} axisLine={false} />
             <Tooltip
-              contentStyle={{ background: '#151b23', border: '1px solid #2a3442', borderRadius: 6, fontSize: 12 }}
+              cursor={{ stroke: '#8a9ab3', strokeDasharray: '3 3' }}
+              contentStyle={{ background: 'rgb(13 20 34 / 0.95)', border: '1px solid #20304b', borderRadius: 10, fontSize: 12, boxShadow: '0 10px 30px -10px #000' }}
+              labelStyle={{ color: '#8a9ab3' }}
+              itemStyle={{ color: '#e8eef8' }}
               labelFormatter={(v) => new Date(v as string).toLocaleString('fr-FR')}
             />
             {series.map(([key, label, color]) => (
-              <Line key={label} type="linear" dataKey={key} name={label} stroke={color} dot={false} strokeWidth={1.5} isAnimationActive={false} connectNulls />
+              <Area
+                key={label}
+                type="monotone"
+                dataKey={key}
+                name={label}
+                stroke={color}
+                fill={`url(#g-${String(key)})`}
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 2, stroke: '#0d1422' }}
+                strokeWidth={2}
+                isAnimationActive={false}
+                connectNulls
+              />
             ))}
-          </LineChart>
+          </AreaChart>
         </ResponsiveContainer>
       )}
     </div>
   );
 }
+
+const REMOTE_BTN =
+  'rounded-lg border border-accent/70 bg-gradient-to-b from-[#5aa6ff] to-[#3b82f6] px-3.5 py-1.5 text-sm font-medium text-white shadow-[0_6px_20px_-8px_rgb(76_154_255/0.8)] transition hover:brightness-110';
 
 // Stockage des documents : taille, nombre de fichiers, date du calcul (quotidien côté agent).
 // Ouvre le client TeamViewer installé sur le poste (gestionnaire d'URL teamviewer10://) sur l'ID du serveur,
@@ -466,7 +505,7 @@ function TeamViewerButton({ id }: { id: string }) {
         onClick={() => {
           navigator.clipboard?.writeText(id).then(() => setCopied(true), () => undefined);
         }}
-        className="rounded-md border border-accent bg-accent/90 px-3 py-1.5 text-sm text-white hover:bg-accent"
+        className={REMOTE_BTN}
         title="Ouvre TeamViewer sur ce serveur (l'ID est aussi copié)"
       >
         Prendre la main (TeamViewer)
@@ -514,7 +553,7 @@ function DeleteConfirm({ s, onCancel }: { s: Detail; onCancel: () => void }) {
   };
 
   return (
-    <div className="rounded-lg border border-crit/60 bg-crit/10 p-4 text-sm">
+    <div className="animate-rise rounded-xl border border-crit/60 bg-crit/10 p-4 text-sm shadow-[0_0_30px_-10px_var(--color-crit)]">
       <p>
         Supprimer <strong>{s.name}</strong> ({s.hostname}) de la console, avec tout son historique ? Cette action est
         définitive. Si l'agent tourne encore sur ce serveur, ses rapports seront refusés jusqu'à sa réinstallation.

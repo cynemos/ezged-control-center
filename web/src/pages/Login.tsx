@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { Button } from '../components/ui';
+import { Button, Logo } from '../components/ui';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [user, setUser] = useState('admin');
@@ -31,12 +31,17 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-lg border border-line bg-panel p-6">
-        <h1 className="text-lg font-semibold">
-          EzGed <span className="text-accent">ControlCenter</span>
-          <span className="mt-0.5 block text-sm font-normal text-muted">Supervision du parc EzGED</span>
-        </h1>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4">
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/20 blur-[120px]" />
+      <div className="pointer-events-none absolute left-[58%] top-[38%] h-72 w-72 rounded-full bg-accent-2/20 blur-[100px]" />
+      <form onSubmit={submit} className="glass relative w-full max-w-sm animate-rise space-y-4 rounded-2xl p-7">
+        <div className="flex flex-col items-center gap-2 pb-2 text-center">
+          <Logo size={52} />
+          <h1 className="text-xl font-semibold tracking-tight">
+            EzGed <span className="text-gradient">ControlCenter</span>
+          </h1>
+          <span className="text-sm text-muted">Supervision du parc EzGED</span>
+        </div>
         <label className="block space-y-1">
           <span className="text-sm text-muted">Utilisateur</span>
           <input className="w-full" value={user} onChange={(e) => setUser(e.target.value)} autoComplete="username" />
@@ -66,9 +71,11 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           </label>
         )}
         {error && <p className="text-sm text-crit">{error}</p>}
-        <Button type="submit" variant="primary" disabled={busy}>
-          Se connecter
-        </Button>
+        <div className="pt-1 [&>button]:w-full">
+          <Button type="submit" variant="primary" disabled={busy}>
+            {busy ? 'Connexion…' : 'Se connecter'}
+          </Button>
+        </div>
       </form>
     </div>
   );

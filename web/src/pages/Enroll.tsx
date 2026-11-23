@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card } from '../components/ui';
+import { Card, PageHeader } from '../components/ui';
 import DeployTokens from '../components/DeployTokens';
 import TeamViewerSync from '../components/TeamViewerSync';
 import { usePoll } from '../hooks';
@@ -14,6 +14,7 @@ export default function Enroll() {
 
   return (
     <div className="max-w-3xl space-y-4">
+      <PageHeader title="Ajouter un serveur" subtitle="Installer l'agent à la main, ou le déployer sur tout le parc par script." />
       <Card title="Installer l'agent sur un serveur EzGED">
         <ol className="list-decimal space-y-3 pl-5 text-sm">
           <li>
@@ -21,7 +22,7 @@ export default function Enroll() {
           </li>
           <li>
             Ouvrir PowerShell <strong>en administrateur</strong> dans ce dossier et lancer :
-            <pre className="mt-2 overflow-x-auto rounded bg-panel-2 p-3 text-xs">
+            <pre className="mt-2 overflow-x-auto rounded-lg border border-line bg-black/30 p-3 text-xs">
               {`powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl ${data.publicUrl} -EnrollKey ${key}`}
             </pre>
             <div className="mt-2 flex gap-3 text-xs">
