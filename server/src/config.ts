@@ -46,7 +46,7 @@ export const config = {
   agentAutoUpdate: env.AGENT_AUTO_UPDATE === '1',
   agentScript: env.AGENT_SCRIPT ?? '',
 
-  // Jeton de script TeamViewer (lecture seule « Ordinateurs et contacts ») : nom et client des fiches
+  // Jeton de script TeamViewer (lecture seule « Ordinateurs et contacts » et « Gestion des appareils ») : nom et client des fiches
   // vides déduits du nom de l'appareil dans le compte TeamViewer.
   teamviewerApiToken: env.TEAMVIEWER_API_TOKEN ?? '',
 

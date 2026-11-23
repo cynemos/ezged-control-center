@@ -8,9 +8,11 @@ interface Status {
   enabled: boolean;
   lastSyncAt: string | null;
   error: string | null;
+  warning: string | null;
   devices: number;
   matched: number;
   updated: number;
+  unmatched: string[];
 }
 
 // Noms TeamViewer : les fiches sans nom ni client les reprennent du compte TeamViewer.
@@ -49,7 +51,7 @@ export default function TeamViewerSync() {
         {!data.enabled ? (
           <p>
             Désactivé : ajouter <code>TEAMVIEWER_API_TOKEN</code> dans le <code>.env</code> de la console (jeton de script TeamViewer, droit de
-            lecture « Ordinateurs et contacts » uniquement), puis redémarrer le service.
+            lecture « Ordinateurs et contacts » et « Gestion des appareils » uniquement), puis redémarrer le service.
           </p>
         ) : data.error ? (
           <p className="text-crit">{data.error}</p>
@@ -57,6 +59,10 @@ export default function TeamViewerSync() {
           <p>
             Dernière synchronisation {dateTime(data.lastSyncAt)} : {data.devices} appareil(s) TeamViewer, {data.matched} serveur(s) reconnu(s),{' '}
             {data.updated} fiche(s) complétée(s).
+            {data.unmatched.length > 0 && (
+              <span className="mt-1 block text-muted">Absents des listes TeamViewer lues : {data.unmatched.join(', ')}.</span>
+            )}
+            {data.warning && <span className="mt-1 block text-warn">{data.warning}</span>}
           </p>
         ) : (
           <p className="text-muted">Première synchronisation en cours.</p>
