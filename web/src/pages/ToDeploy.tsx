@@ -62,8 +62,9 @@ export default function ToDeploy() {
         subtitle={
           data.enabled ? (
             <>
-              Appareils du groupe TeamViewer {(data.groups?.found.length ? data.groups.found : data.groups?.wanted)?.join(', ') || 'EzGED'} sans agent de supervision :{' '}
-              <b className={todo.length ? 'text-warn' : 'text-ok'}>{todo.length}</b> à équiper, dont {online} en ligne.
+              Appareils du groupe TeamViewer {(data.groups?.found.length ? data.groups.found : data.groups?.wanted)?.join(', ') || 'EzGED'}{' '}
+              sans agent de supervision : <b className={todo.length ? 'text-warn' : 'text-ok'}>{todo.length}</b> à équiper, dont {online} en
+              ligne.
             </>
           ) : (
             'Synchronisation TeamViewer désactivée.'
@@ -178,9 +179,11 @@ export default function ToDeploy() {
             {rows.length === 0 && (
               <p className="py-12 text-center text-muted">
                 {view === 'todo'
-                  ? data.lastSyncAt
-                    ? 'Tous les serveurs du groupe ont leur agent.'
-                    : 'Première synchronisation en cours.'
+                  ? data.lastSyncAt && data.groups && !data.groups.found.length
+                    ? 'Groupe TeamViewer non lu : liste indisponible (voir le message ci-dessus).'
+                    : data.lastSyncAt
+                      ? 'Tous les serveurs du groupe ont leur agent.'
+                      : 'Première synchronisation en cours.'
                   : 'Aucun appareil ignoré.'}
               </p>
             )}

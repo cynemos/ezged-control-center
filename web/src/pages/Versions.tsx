@@ -25,6 +25,23 @@ function cmpVersion(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * Révision EzGED : le fichier revision.txt contient selon les serveurs « 32444 » ou « 123 (31829) ».
+ * Seul le numéro de révision (entre parenthèses, ou seul) se compare d'un serveur à l'autre.
+ */
+function ezgedRevision(v: string): string {
+  return v.match(/\((\d+)\)/)?.[1] ?? v.match(/^\s*(\d+)\s*$/)?.[1] ?? v;
+}
+
+function cmpComponent(k: Key, a: string, b: string): number {
+  return k === 'ezged' ? cmpVersion(ezgedRevision(a), ezgedRevision(b)) : cmpVersion(a, b);
+}
+
+/** Version Windows lisible (24H2, 22H2) ; les anciens systèmes ne remontent que « 10.0.17763 ». */
+function displayVersion(v: string | null | undefined): string | null {
+  return v && /^\d{2}H\d$/i.test(v) ? v.toUpperCase() : null;
+}
+
 /** Dernière mise à jour Windows au-delà de ce délai : signalée en orange. */
 const STALE_UPDATE_DAYS = 45;
 /** Fin de support à moins de ce délai : signalée en orange. */
@@ -80,9 +97,10 @@ function count(values: (string | null)[]): Map<string, number> {
 }
 
 /** Répartition d'un composant : une barre par version, la plus récente en premier. */
-function Distribution({ label, values, latest }: { label: string; values: (string | null)[]; latest?: string }) {
-  const rows = [...count(values).entries()].sort((a, b) => cmpVersion(b[0], a[0]));
-  const upToDate = latest ? values.filter((v) => v && cmpVersion(v, latest) >= 0).length : 0;
+function Distribution({ k, label, values, latest }: { k: Key; label: string; values: (string | null)[]; latest?: string }) {
+  const cmp = (a: string, b: string) => cmpComponent(k, a, b);
+  const rows = [...count(values).entries()].sort((a, b) => (a[0] === 'inconnue' ? 1 : b[0] === 'inconnue' ? -1 : cmp(b[0], a[0])));
+  const upToDate = latest ? values.filter((v) => v && cmp(v, latest) >= 0).length : 0;
   return (
     <Card
       title={label}
@@ -94,7 +112,7 @@ function Distribution({ label, values, latest }: { label: string; values: (strin
         )
       }
     >
-      <Bars rows={rows} warnIf={(v) => !!latest && cmpVersion(v, latest) < 0} />
+      <Bars rows={rows} warnIf={(v) => !!latest && cmp(v, latest) < 0} />
     </Card>
   );
 }
@@ -127,8 +145,18 @@ function OsSection({ servers }: { servers: ServerSummary[] }) {
   const withOs = servers.filter((s) => s.os);
   const editions = [...count(servers.map((s) => s.os?.caption ?? null)).entries()].sort((a, b) => b[1] - a[1]);
   const releases = [
-    ...count(servers.map((s) => (s.os ? [s.os.version, s.os.build?.split('.')[0]].filter(Boolean).join(' · build ') : null))).entries(),
-  ].sort((a, b) => cmpVersion(b[0], a[0]));
+    ...count(
+      servers.map((s) =>
+        s.os ? [displayVersion(s.os.version), `build ${s.os.build?.split('.')[0] ?? '?'}`].filter(Boolean).join(' · ') : null,
+      ),
+    ).entries(),
+  ].sort((a, b) =>
+    a[0] === 'inconnue'
+      ? 1
+      : b[0] === 'inconnue'
+        ? -1
+        : Number(b[0].match(/build (\d+)/)?.[1] ?? 0) - Number(a[0].match(/build (\d+)/)?.[1] ?? 0),
+  );
   const sup = { expired: 0, soon: 0, ok: 0, unknown: 0 };
   servers.forEach((s) => sup[support(s)]++);
   const pending = servers.filter((s) => (s.windowsUpdatesPending ?? 0) > 0).length;
@@ -199,7 +227,7 @@ function OsSection({ servers }: { servers: ServerSummary[] }) {
                     <div className="truncate text-[11px] text-muted">{s.client ?? 'non affecté'}</div>
                   </td>
                   <td>{s.os?.caption ?? <span className="text-muted">—</span>}</td>
-                  <td className="tabular-nums">{s.os?.version ?? '—'}</td>
+                  <td className="tabular-nums">{displayVersion(s.os?.version) ?? <span className="text-muted">—</span>}</td>
                   <td className="tabular-nums text-muted">{s.os?.build ?? '—'}</td>
                   <td>
                     <SupportCell s={s} />
@@ -237,7 +265,7 @@ export default function Versions() {
     const out: Partial<Record<Key, string>> = {};
     for (const [k] of COLS) {
       const vals = servers.map((s) => s.versions[k]).filter(Boolean) as string[];
-      if (vals.length) out[k] = vals.sort(cmpVersion).at(-1);
+      if (vals.length) out[k] = vals.sort((a, b) => cmpComponent(k, a, b)).at(-1);
     }
     return out;
   }, [servers]);
@@ -255,7 +283,7 @@ export default function Versions() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {COLS.map(([k, label]) => (
-          <Distribution key={k} label={label} values={servers.map((s) => s.versions[k])} latest={latest[k]} />
+          <Distribution key={k} k={k} label={label} values={servers.map((s) => s.versions[k])} latest={latest[k]} />
         ))}
       </div>
 
@@ -285,7 +313,7 @@ export default function Versions() {
                 </td>
                 {COLS.map(([k]) => {
                   const v = s.versions[k];
-                  const old = v && latest[k] && cmpVersion(v, latest[k]!) < 0;
+                  const old = v && latest[k] && cmpComponent(k, v, latest[k]!) < 0;
                   return (
                     <td key={k} className="tabular-nums">
                       {!v ? (

@@ -20,6 +20,7 @@ const SERVER: Entry[] = [
 
 const CLIENT: Entry[] = [
   { build: 7601, name: 'Windows 7', end: '2020-01-14' },
+  { build: 9200, name: 'Windows 8', end: '2016-01-12' },
   { build: 9600, name: 'Windows 8.1', end: '2023-01-10' },
   { build: 19044, name: 'Windows 10 21H2', end: '2023-06-13' },
   { build: 19045, name: 'Windows 10 22H2', end: '2025-10-14' },
