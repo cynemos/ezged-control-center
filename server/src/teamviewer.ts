@@ -93,14 +93,21 @@ async function tvGet<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** Appareils gérés (Remote Management, affectation au compte), paginés. */
-async function managedDevices(path: string): Promise<{ teamviewerId?: number | string; name?: string }[]> {
-  const out: { teamviewerId?: number | string; name?: string }[] = [];
+interface ManagedDevice {
+  teamviewerId?: number | string;
+  name?: string;
+  isOnline?: boolean;
+  lastSeen?: string;
+}
+
+/** Ressources de l'API « managed » (appareils, groupes d'appareils), paginées. */
+async function managedDevices<T = ManagedDevice>(path: string): Promise<T[]> {
+  const out: T[] = [];
   let token = '';
   for (let page = 0; page < 50; page++) {
     const body = await tvGet<{
       nextPaginationToken?: string;
-      resources?: { teamviewerId?: number; name?: string }[];
+      resources?: T[];
     }>(path + (token ? `?paginationToken=${encodeURIComponent(token)}` : ''));
     out.push(...(body.resources ?? []));
     if (!body.nextPaginationToken || body.nextPaginationToken === token) break;
@@ -135,13 +142,14 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
       add(d.teamviewer_id, d.alias);
     }
     const warnings: string[] = [];
-    // Noms des groupes, pour repérer les appareils des groupes EzGED.
+    // Noms des groupes de la liste « Ordinateurs et contacts » (droit « Gestion des groupes »).
     const groupNames = new Map<string, string>();
+    let groupsError: string | null = null;
     try {
       const g = await tvGet<{ groups?: { id?: string; name?: string }[] }>('/groups');
       for (const x of g.groups ?? []) if (x.id && x.name) groupNames.set(x.id, x.name);
     } catch (e) {
-      warnings.push(`groupes non lus (${(e as Error).message}) : ajouter au jeton le droit de lecture « Gestion des groupes »`);
+      groupsError = (e as Error).message;
     }
     // Appareils gérés (personnels puis de l'entreprise) : facultatifs, ils demandent le droit de
     // lecture « Gestion des appareils » sur le jeton.
@@ -209,35 +217,56 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
     const equipped = new Set(rows.map((r) => digits(r.tv)));
     const ignored = new Set((await db.query<{ tv_id: string }>('SELECT tv_id FROM tv_ignored')).map((r) => r.tv_id));
     const wanted = config.teamviewerGroups;
-    const found = [...groupNames.values()].filter((n) => wanted.includes(n.toLowerCase()));
+    const found = new Set<string>();
     const toDeploy: TvCandidate[] = [];
     const seen = new Set<string>();
+    const consider = (rawIds: unknown[], rawAlias: unknown, group: string, online: boolean | null, lastSeen: string | null) => {
+      const ids = rawIds.map(digits).filter(Boolean);
+      const tvId = ids[0];
+      if (!tvId || ids.some((i) => seen.has(i) || equipped.has(i))) return;
+      ids.forEach((i) => seen.add(i));
+      const alias = String(rawAlias ?? '').trim() || tvId;
+      toDeploy.push({ tvId, alias, client: clientFromAlias(alias), group, online, lastSeen, ignored: ids.some((i) => ignored.has(i)) });
+    };
+    // 1. Groupes de la liste « Ordinateurs et contacts ».
     for (const d of body.devices ?? []) {
       const group = groupNames.get(d.groupid ?? '');
       if (!group || !wanted.includes(group.toLowerCase())) continue;
-      const ids = [digits(d.remotecontrol_id), digits(d.teamviewer_id)].filter(Boolean);
-      const tvId = ids[0];
-      if (!tvId || seen.has(tvId) || ids.some((i) => equipped.has(i))) continue;
-      seen.add(tvId);
-      const alias = String(d.alias ?? '').trim() || tvId;
-      toDeploy.push({
-        tvId,
-        alias,
-        client: clientFromAlias(alias),
+      found.add(group);
+      consider(
+        [d.remotecontrol_id, d.teamviewer_id],
+        d.alias,
         group,
-        online: d.online_state ? d.online_state.toLowerCase() === 'online' : null,
-        lastSeen: d.last_seen ?? null,
-        ignored: ids.some((i) => ignored.has(i)),
-      });
+        d.online_state ? d.online_state.toLowerCase() === 'online' : null,
+        d.last_seen ?? null,
+      );
+    }
+    // 2. Groupes d'appareils gérés (droit « Groupes d'appareils »), du même nom.
+    let managedGroupsError: string | null = null;
+    try {
+      const groups = await managedDevices<{ id?: string; name?: string }>('/managed/groups');
+      for (const g of groups) {
+        if (!g.id || !g.name || !wanted.includes(g.name.toLowerCase())) continue;
+        found.add(g.name);
+        for (const d of await managedDevices(`/managed/groups/${encodeURIComponent(g.id)}/devices`)) {
+          consider([d.teamviewerId], d.name, g.name, typeof d.isOnline === 'boolean' ? d.isOnline : null, d.lastSeen ?? null);
+        }
+      }
+    } catch (e) {
+      managedGroupsError = (e as Error).message;
     }
     toDeploy.sort((a, b) => Number(b.online) - Number(a.online) || a.alias.localeCompare(b.alias, 'fr'));
-    if (groupNames.size && !found.length) {
+    if (groupsError && managedGroupsError) {
+      warnings.push(
+        `groupes non lus (${groupsError} ; ${managedGroupsError}) : ajouter au jeton le droit de lecture « Gestion des groupes » ou « Groupes d'appareils »`,
+      );
+    } else if (!found.size) {
       warnings.push(`aucun groupe TeamViewer nommé ${wanted.join(' ou ')} : renseigner TEAMVIEWER_GROUPS dans le .env`);
     }
     const groupWarning = warnings.length ? `agents à déployer : ${warnings.join(' ; ')}` : null;
 
     Object.assign(tvStatus, {
-      groups: { wanted, found },
+      groups: { wanted, found: [...found] },
       toDeploy,
       lastSyncAt: new Date().toISOString(),
       error: null,
