@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Route, Routes, useLocation } from 'react-router';
+import { Link, NavLink, Route, Routes, useLocation } from 'react-router';
 import { api } from './api';
 import { Logo } from './components/ui';
+import About from './pages/About';
 import Alerts from './pages/Alerts';
 import Enroll from './pages/Enroll';
 import Fleet from './pages/Fleet';
+import Help from './pages/Help';
 import Login from './pages/Login';
 import Server from './pages/Server';
 import ToDeploy, { ToDeployCount } from './pages/ToDeploy';
@@ -20,6 +22,7 @@ const NAV = [
 
 export default function App() {
   const [auth, setAuth] = useState<'unknown' | 'in' | 'out'>('unknown');
+  const [version, setVersion] = useState<string | null>(null);
   const { pathname } = useLocation();
 
   // Revenir en haut de page à chaque changement d'écran.
@@ -30,8 +33,11 @@ export default function App() {
   }, [pathname]);
 
   useEffect(() => {
-    api('/api/me')
-      .then(() => setAuth('in'))
+    api<{ version?: string }>('/api/me')
+      .then((me) => {
+        setVersion(me.version ?? null);
+        setAuth('in');
+      })
       .catch(() => setAuth('out'));
     const onUnauth = () => setAuth('out');
     window.addEventListener('ezgedcc:unauthorized', onUnauth);
@@ -39,7 +45,18 @@ export default function App() {
   }, []);
 
   if (auth === 'unknown') return null;
-  if (auth === 'out') return <Login onLogin={() => setAuth('in')} />;
+  if (auth === 'out')
+    return (
+      <Login
+        onLogin={() => {
+          setAuth('in');
+          void api<{ version?: string }>('/api/me').then(
+            (me) => setVersion(me.version ?? null),
+            () => undefined,
+          );
+        }}
+      />
+    );
 
   const logout = async () => {
     await api('/api/logout', { method: 'POST' });
@@ -47,7 +64,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-20 border-b border-line/70 bg-bg/70 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5">
           <NavLink to="/" className="flex items-center gap-2.5">
@@ -55,6 +72,14 @@ export default function App() {
             <span className="text-[15px] font-semibold tracking-tight">
               EzGed <span className="text-gradient">ControlCenter</span>
             </span>
+            {version && (
+              <span
+                className="rounded-md border border-line bg-white/[0.03] px-1.5 py-px font-mono text-[10px] text-muted"
+                title="Version de la console"
+              >
+                {version}
+              </span>
+            )}
           </NavLink>
           <nav className="flex flex-wrap gap-1">
             {NAV.map(([to, label]) => (
@@ -83,6 +108,13 @@ export default function App() {
               </span>
               En direct
             </span>
+            <NavLink
+              to="/aide"
+              className={({ isActive }) => `text-sm transition hover:text-text ${isActive ? 'text-text' : 'text-muted'}`}
+              title="Aide"
+            >
+              Aide
+            </NavLink>
             <button onClick={logout} className="text-sm text-muted transition hover:text-text">
               Déconnexion
             </button>
@@ -90,7 +122,7 @@ export default function App() {
         </div>
         <div className="h-px animate-sweep bg-[linear-gradient(90deg,transparent,rgb(76_154_255/0.7),rgb(139_92_246/0.7),transparent)] bg-[length:50%_100%] bg-no-repeat" />
       </header>
-      <main className="mx-auto max-w-[1500px] px-4 py-6">
+      <main className="mx-auto w-full max-w-[1500px] flex-1 px-4 py-6">
         <Routes>
           <Route path="/" element={<Fleet />} />
           <Route path="/serveurs/:id" element={<Server />} />
@@ -98,9 +130,27 @@ export default function App() {
           <Route path="/alertes" element={<Alerts />} />
           <Route path="/a-deployer" element={<ToDeploy />} />
           <Route path="/ajouter" element={<Enroll />} />
+          <Route path="/aide" element={<Help />} />
+          <Route path="/a-propos" element={<About />} />
           <Route path="*" element={<p className="text-muted">Page introuvable.</p>} />
         </Routes>
       </main>
+      <footer className="mt-10 border-t border-line/60">
+        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-4 text-xs text-muted">
+          <span>
+            EzGed ControlCenter{version && <span className="font-mono"> {version}</span>} · <span className="text-text/80">@CYNEPROD</span>{' '}
+            Cyril Nectoux
+          </span>
+          <span className="flex gap-4">
+            <Link to="/aide" className="transition hover:text-text">
+              Aide
+            </Link>
+            <Link to="/a-propos" className="transition hover:text-text">
+              À propos
+            </Link>
+          </span>
+        </div>
+      </footer>
     </div>
   );
 }

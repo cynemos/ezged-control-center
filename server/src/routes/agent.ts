@@ -31,7 +31,7 @@ const AGENT_CANDIDATES = [config.agentScript, '../agent/ezged-cc-agent.ps1', '..
 let agentCache: { path: string; mtimeMs: number; body: Buffer; version: string; sha256: string } | null = null;
 
 /** Script agent courant (relu si modifié sur disque), ou null s'il est introuvable. */
-async function agentScript() {
+export async function agentScript() {
   const path = AGENT_CANDIDATES.find((p) => existsSync(p));
   if (!path) return null;
   const { mtimeMs } = await stat(path);

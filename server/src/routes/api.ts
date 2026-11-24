@@ -7,6 +7,8 @@ import { config } from '../config.js';
 import type { Db } from '../db.js';
 import { normalizeSnapshot } from '../normalize.js';
 import { osSupport } from '../oslife.js';
+import { consoleVersion, startedAt } from '../version.js';
+import { agentScript } from './agent.js';
 import type { Inventory, Snapshot } from '../types.js';
 
 interface ServerRow {
@@ -169,7 +171,26 @@ export function apiRoutes(app: FastifyInstance, db: Db) {
   app.register(async (priv) => {
     priv.addHook('preHandler', requireUser);
 
-    priv.get('/api/me', async () => ({ user: config.adminUser }));
+    priv.get('/api/me', async () => ({ user: config.adminUser, version: consoleVersion.version }));
+
+    // Page « À propos » : versions de la console et de l'agent embarqué, environnement d'exécution.
+    priv.get('/api/about', async () => {
+      const [counts] = await db.query<{ servers: number; clients: number }>(
+        'SELECT (SELECT count(*)::int FROM servers) AS servers, (SELECT count(*)::int FROM clients) AS clients',
+      );
+      return {
+        ...consoleVersion,
+        agentVersion: (await agentScript())?.version ?? null,
+        node: process.version,
+        database: config.databaseUrl ? 'PostgreSQL' : 'PGlite (fichier local)',
+        startedAt,
+        publicUrl: config.publicUrl,
+        teamviewer: Boolean(config.teamviewerApiToken),
+        agentAutoUpdate: config.agentAutoUpdate,
+        servers: counts?.servers ?? 0,
+        clients: counts?.clients ?? 0,
+      };
+    });
 
     priv.get('/api/servers', async () => {
       const rows = await db.query<ServerRow>(`${SERVER_SELECT} ORDER BY c.name NULLS LAST, COALESCE(s.display_name, s.hostname)`);
