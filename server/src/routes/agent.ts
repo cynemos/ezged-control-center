@@ -68,6 +68,10 @@ async function diskTrend(db: Db, serverId: string): Promise<number | null> {
   return days;
 }
 
+function digits(v: unknown): string {
+  return String(v ?? '').replace(/\D/g, '').slice(0, 20);
+}
+
 function clampPct(n: unknown): number | null {
   return typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null;
 }
@@ -86,13 +90,15 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
 
   // Enregistrement : l'installeur échange la clé d'enrôlement, ou un jeton de déploiement,
   // contre un jeton propre au serveur.
-  // Si la machine est déjà connue (même MachineGuid), sa fiche et son historique sont conservés
-  // et seul le jeton est renouvelé : l'ancien jeton cesse de fonctionner.
-  app.post<{ Body: { enrollKey?: string; deployToken?: string; hostname?: string; rustdeskId?: string; machineId?: string } }>(
+  // Si la machine est déjà connue (même MachineGuid et même ID TeamViewer), sa fiche et son historique
+  // sont conservés et seul le jeton est renouvelé : l'ancien jeton cesse de fonctionner.
+  app.post<{
+    Body: { enrollKey?: string; deployToken?: string; hostname?: string; rustdeskId?: string; machineId?: string; teamviewerId?: string };
+  }>(
     '/api/agent/enroll',
     { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
     async (req, reply) => {
-      const { enrollKey = '', deployToken = '', hostname = '', rustdeskId, machineId } = req.body ?? {};
+      const { enrollKey = '', deployToken = '', hostname = '', rustdeskId, machineId, teamviewerId } = req.body ?? {};
       const name = String(hostname).trim().slice(0, 100);
       if (!name) return reply.code(400).send({ error: 'hostname manquant' });
       let deployId: string | null = null;
@@ -104,25 +110,46 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
       }
       const machine = machineId ? String(machineId).trim().toLowerCase().slice(0, 64) || null : null;
       const rustdesk = rustdeskId ? String(rustdeskId).slice(0, 50) : null;
+      const tv = digits(teamviewerId);
 
       const token = newToken();
+      // Fiche existante de la même machine (MachineGuid). Deux serveurs clonés depuis la même image
+      // partagent ce MachineGuid : l'ID TeamViewer les départage, un clone reçoit sa propre fiche
+      // (machine_id « guid|idTeamViewer ») au lieu de reprendre celle de l'autre.
+      let machineKey = machine;
       if (machine) {
-        const [known] = await db.query<{ id: string }>(
-          `UPDATE servers SET token_hash = $2, hostname = $3, rustdesk_id = COALESCE($4, rustdesk_id),
-                  deploy_token_id = COALESCE($5, deploy_token_id)
-            WHERE machine_id = $1 RETURNING id`,
-          [machine, sha256(token), name, rustdesk, deployId],
+        const known = await db.query<{ id: string; machine_id: string; tv: string | null }>(
+          `SELECT id, machine_id, snapshot->>'teamviewerId' AS tv FROM servers
+            WHERE machine_id = $1 OR machine_id LIKE $1 || '|%'`,
+          [machine],
         );
-        if (known) {
-          req.log.info({ id: known.id, hostname: name }, 'Agent réenrôlé, fiche existante conservée');
-          return { serverId: known.id, token, reused: true };
+        const same = tv
+          ? (known.find((k) => digits(k.tv) === tv || k.machine_id === `${machine}|${tv}`) ??
+            known.find((k) => k.machine_id === machine && !digits(k.tv)))
+          : known.find((k) => k.machine_id === machine);
+        if (same) {
+          await db.query(
+            `UPDATE servers SET token_hash = $2, hostname = $3, rustdesk_id = COALESCE($4, rustdesk_id),
+                    deploy_token_id = COALESCE($5, deploy_token_id)
+              WHERE id = $1`,
+            [same.id, sha256(token), name, rustdesk, deployId],
+          );
+          req.log.info({ id: same.id, hostname: name }, 'Agent réenrôlé, fiche existante conservée');
+          return { serverId: same.id, token, reused: true };
+        }
+        if (known.length && tv) {
+          machineKey = `${machine}|${tv}`;
+          req.log.warn({ hostname: name, teamviewerId: tv, others: known.map((k) => k.id) }, 'MachineGuid déjà connu (serveur cloné) : nouvelle fiche');
+        } else if (known.length) {
+          machineKey = null;
+          req.log.warn({ hostname: name, others: known.map((k) => k.id) }, 'MachineGuid déjà connu, sans ID TeamViewer : nouvelle fiche');
         }
       }
 
       const id = randomUUID();
       await db.query(
         'INSERT INTO servers (id, hostname, token_hash, rustdesk_id, machine_id, deploy_token_id) VALUES ($1, $2, $3, $4, $5, $6)',
-        [id, name, sha256(token), rustdesk, machine, deployId],
+        [id, name, sha256(token), rustdesk, machineKey, deployId],
       );
       req.log.info({ id, hostname: name, deployToken: deployId }, 'Agent enrôlé');
       return { serverId: id, token, reused: false };
@@ -139,6 +166,14 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
     const script = await bootstrapScript(token);
     if (!script) return reply.code(500).type('text/plain').send("throw 'Scripts agent introuvables sur la console'");
     return reply.type('text/plain; charset=utf-8').header('cache-control', 'no-store').send(script);
+  });
+
+  // Contrôle du jeton par l'installeur : un jeton refusé (fiche supprimée, ou reprise par un autre
+  // serveur) déclenche un nouvel enregistrement au lieu d'un agent qui échoue en silence.
+  app.get('/api/agent/whoami', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const server = await authAgent(req);
+    if (!server) return reply.code(401).send({ error: 'Jeton invalide' });
+    return { serverId: server.id };
   });
 
   app.post<{ Body: AgentReport }>('/api/agent/report', { bodyLimit: 1024 * 1024 }, async (req, reply) => {
@@ -160,8 +195,8 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
 
     // Nouvel agent, ou ID TeamViewer changé : synchronisation TeamViewer sans attendre le quart
     // d'heure, pour le nom et le client de la fiche et la liste des agents à déployer.
-    const tvId = String(snapshot.teamviewerId ?? '').replace(/\D/g, '');
-    if (tvId && tvId !== String(server.tv ?? '').replace(/\D/g, '')) requestTeamViewerSync(db, (msg) => req.log.warn(msg));
+    const tvId = digits(snapshot.teamviewerId);
+    if (tvId && tvId !== digits(server.tv)) requestTeamViewerSync(db, (msg) => req.log.warn(msg));
 
     // Serveurs enrôlés avant l'ajout de machine_id : renseigné au premier rapport qui le fournit,
     // sauf si une autre fiche porte déjà cet identifiant.

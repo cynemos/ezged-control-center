@@ -149,6 +149,8 @@ Depuis la page **Ajouter un serveur** de la console : copier le dossier `agent\`
 powershell -ExecutionPolicy Bypass -File .\install-agent.ps1 -ServerUrl https://ezged-cc.mondomaine.fr -EnrollKey <clé>
 ```
 
+Réinstallation et serveurs clonés : un serveur est reconnu par son MachineGuid Windows et son ID TeamViewer. Réinstallé, il garde sa fiche et son historique. Deux serveurs clonés depuis la même image partagent le même MachineGuid : l'ID TeamViewer les départage et chacun a sa fiche (avant la v0.8.1, le second reprenait la fiche du premier, dont l'agent était alors refusé en 401). Relancé sur un serveur déjà enregistré, l'installeur vérifie son jeton auprès de la console et se réenregistre s'il est refusé. Messages de l'installation, y compris en échec : `C:\ProgramData\EzGedControlCenter\install.log` ; la fenêtre reste ouverte deux minutes sur un échec.
+
 ### Déploiement par script (TeamViewer Remote Management, GPO...)
 
 Sur la page **Ajouter un serveur**, la section « Déploiement par script » génère un script PowerShell de quelques lignes : à enregistrer dans TeamViewer (Remote Management, Scripts, type PowerShell, « Exécuter en tant qu'administrateur ») puis à lancer sur un groupe d'appareils. Le script télécharge l'installeur et l'agent depuis `/api/agent/bootstrap` et lance `install-agent.ps1 -DeployToken`. Il ne contient pas la clé d'enrôlement mais un jeton de déploiement :

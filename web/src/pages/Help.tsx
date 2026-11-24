@@ -243,6 +243,16 @@ export default function Help() {
               <dd className="text-muted">
                 Enregistré mais aucun rapport reçu : vérifier que la tâche planifiée tourne et que le serveur joint l’adresse de la console.
               </dd>
+              <dt className="font-medium">Agent refusé (401)</dt>
+              <dd className="text-muted">
+                Jeton de l’agent refusé : fiche supprimée, ou reprise par un serveur cloné (même MachineGuid) avant la v0.8.1. Relancer
+                l’installeur sur le serveur : il vérifie son jeton et se réenregistre.
+              </dd>
+              <dt className="font-medium">Installation en échec</dt>
+              <dd className="text-muted">
+                La fenêtre du script TeamViewer reste ouverte deux minutes ; le détail est dans{' '}
+                <code>C:\ProgramData\EzGedControlCenter\install.log</code>.
+              </dd>
               <dt className="font-medium">Section « Disponible à partir de l’agent x »</dt>
               <dd className="text-muted">L’agent du serveur est trop ancien : le mettre à jour.</dd>
               <dt className="font-medium">Agents à déployer vide</dt>

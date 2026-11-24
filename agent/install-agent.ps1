@@ -38,9 +38,36 @@ param(
 # Ce debut de script doit rester lisible par PowerShell 2.0 (Server 2008 R2 d'origine).
 $ErrorActionPreference = 'Stop'
 
+# Journal d'installation : la fenetre ouverte par un script TeamViewer se ferme a la fin, le
+# message d'erreur reste lisible dans ce fichier.
+$InstallLog = Join-Path $env:ProgramData 'EzGedControlCenter\install.log'
+function Write-InstallLog([string]$Message) {
+  try {
+    $d = Split-Path $InstallLog
+    if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+    Add-Content -Path $InstallLog -Value ("{0} {1}" -f (Get-Date -Format 's'), $Message)
+  } catch { }
+}
+
+# Sur echec ou avertissement, une fenetre interactive reste ouverte jusqu'a une touche (2 min au plus).
+function Wait-BeforeClose {
+  if (-not [Environment]::UserInteractive) { return }
+  try {
+    Write-Host 'Appuyer sur une touche pour fermer (fermeture automatique dans 2 minutes)...'
+    $end = (Get-Date).AddMinutes(2)
+    while ((Get-Date) -lt $end) {
+      if ([Console]::KeyAvailable) { [void][Console]::ReadKey($true); break }
+      Start-Sleep -Milliseconds 200
+    }
+  } catch { }
+}
+
 function Stop-Install([string]$Message) {
   Write-Host ''
   Write-Host "ECHEC : $Message" -ForegroundColor Red
+  Write-InstallLog "ECHEC : $Message"
+  Write-Host "Journal d'installation : $InstallLog"
+  Wait-BeforeClose
   exit 1
 }
 
@@ -53,6 +80,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
   Stop-Install 'lancer ce script dans un PowerShell "Executer en tant qu''administrateur".'
 }
 
+Write-InstallLog "Debut de l'installation ($env:COMPUTERNAME, console $ServerUrl)"
 $os = Get-WmiObject Win32_OperatingSystem
 Write-Host "Systeme    : $($os.Caption) (build $($os.BuildNumber))"
 Write-Host "PowerShell : $($PSVersionTable.PSVersion)"
@@ -130,6 +158,25 @@ function Protect-Secret([string]$Value) {
     [Text.Encoding]::UTF8.GetBytes($Value), $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
   return [Convert]::ToBase64String($bytes)
 }
+function Unprotect-Secret([string]$Value) {
+  $bytes = [Security.Cryptography.ProtectedData]::Unprotect(
+    [Convert]::FromBase64String($Value), $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+  return [Text.Encoding]::UTF8.GetString($bytes)
+}
+
+# Identifiant TeamViewer (meme lecture que l'agent) : departage deux serveurs clones depuis la meme
+# image, qui ont le meme MachineGuid.
+function Get-TeamViewerId {
+  foreach ($root in 'HKLM:\SOFTWARE\WOW6432Node\TeamViewer', 'HKLM:\SOFTWARE\TeamViewer') {
+    if (-not (Test-Path $root)) { continue }
+    $keys = @(Get-Item $root) + @(Get-ChildItem $root -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^Version\d+$' })
+    foreach ($k in $keys) {
+      $id = (Get-ItemProperty -Path $k.PSPath -Name ClientID -ErrorAction SilentlyContinue).ClientID
+      if ($id) { return [string]$id }
+    }
+  }
+  return $null
+}
 
 # 1. Dossier reserve a SYSTEM et aux administrateurs
 New-Item -ItemType Directory -Path $Dir -Force | Out-Null
@@ -149,6 +196,30 @@ if (-not $RustDeskId) {
 $existing = $null
 if (Test-Path $ConfigPath) { $existing = Get-Content $ConfigPath -Raw | ConvertFrom-Json }
 
+$teamviewerId = Get-TeamViewerId
+# Jeton deja present : controle aupres de la console. Refuse (fiche supprimee, ou reprise par un
+# serveur clone avant la v0.8.1), il est remplace par un nouvel enregistrement.
+if ($existing -and $existing.tokenProtected -and -not $Reenroll) {
+  $refused = $false
+  $t = $null
+  try { $t = Unprotect-Secret $existing.tokenProtected } catch { $refused = $true }
+  if ($t) {
+    try {
+      Invoke-RestMethod -Uri "$ServerUrl/api/agent/whoami" -Headers @{ Authorization = "Bearer $t" } -TimeoutSec 20 @Basic | Out-Null
+    } catch {
+      # Console d'avant la v0.8.1 (404) ou reseau : jeton garde. Seul un refus explicite (401) compte.
+      $status = $null
+      try { $status = [int]$_.Exception.Response.StatusCode } catch { }
+      if ($status -eq 401) { $refused = $true }
+    }
+  }
+  if ($refused) {
+    Write-Host "Jeton refuse par la console (serveur $($existing.serverId)) : nouvel enregistrement."
+    Write-InstallLog "Jeton refuse par la console (serveur $($existing.serverId)) : nouvel enregistrement"
+    $existing.tokenProtected = $null
+  }
+}
+
 if ($existing -and $existing.tokenProtected -and -not $Reenroll) {
   Write-Host "Agent deja enregistre (serveur $($existing.serverId)) : jeton conserve."
   $serverId = $existing.serverId
@@ -157,7 +228,7 @@ if ($existing -and $existing.tokenProtected -and -not $Reenroll) {
   # MachineGuid : identifie la machine pour que la console reutilise sa fiche en cas de reinstallation
   $machineId = $null
   try { $machineId = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid).MachineGuid } catch { }
-  $body = @{ hostname = $env:COMPUTERNAME; rustdeskId = $RustDeskId; machineId = $machineId }
+  $body = @{ hostname = $env:COMPUTERNAME; rustdeskId = $RustDeskId; machineId = $machineId; teamviewerId = $teamviewerId }
   if ($DeployToken) { $body.deployToken = $DeployToken } else { $body.enrollKey = $EnrollKey }
   try {
     $resp = Invoke-RestMethod -Method Post -Uri "$ServerUrl/api/agent/enroll" `
@@ -253,8 +324,16 @@ for ($i = 0; $i -lt 45; $i++) {
   # state.json est reecrit apres chaque envoi accepte par la console.
   if ((Test-Path $statePath) -and (Get-Item $statePath).LastWriteTime -ge $runAt) { $ok = $true; break }
 }
-if ($ok) { Write-Host "Agent installe et premier rapport recu par la console." -ForegroundColor Green }
-else {
+if ($ok) {
+  Write-Host "Agent installe et premier rapport recu par la console." -ForegroundColor Green
+  Write-InstallLog "Agent installe, premier rapport recu (serveur $serverId)"
+} else {
   Write-Warning "Pas de rapport confirme apres 90 s. Journal : $log"
-  if (Test-Path $log) { Get-Content $log -Tail 5 }
+  Write-InstallLog "AVERTISSEMENT : pas de rapport confirme apres 90 s (serveur $serverId), voir $log"
+  if (Test-Path $log) {
+    $tail = Get-Content $log -Tail 5
+    $tail
+    foreach ($l in $tail) { Write-InstallLog "  $l" }
+  }
+  Wait-BeforeClose
 }
