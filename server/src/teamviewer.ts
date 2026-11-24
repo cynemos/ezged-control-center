@@ -2,9 +2,9 @@ import { config } from './config.js';
 import type { Db } from './db.js';
 
 // Synchronisation avec la liste « Ordinateurs et contacts » du compte TeamViewer (API web, jeton de
-// script en lecture seule). Chaque serveur est retrouvé par l'ID TeamViewer que remonte l'agent ;
-// son nom TeamViewer remplit le nom affiché et le client des fiches encore vides, sans jamais
-// écraser une saisie faite dans la console.
+// script en lecture seule). Chaque serveur est retrouvé par l'ID TeamViewer que remonte l'agent :
+// le nom affiché suit le nom TeamViewer, sauf s'il a été saisi dans la console ; le client des
+// fiches encore vides en est déduit. Une fiche dont l'appareil a disparu de TeamViewer est supprimée.
 
 const API = 'https://webapi.teamviewer.com/api/v1';
 
@@ -19,6 +19,10 @@ export interface TeamViewerStatus {
   updated: number;
   /** Serveurs dont l'ID TeamViewer n'est dans aucune liste lue (nom de machine et ID). */
   unmatched: string[];
+  /** Fiches supprimées car leur appareil a disparu de TeamViewer (20 dernières depuis le démarrage). */
+  removed: string[];
+  /** Appareils disparus de TeamViewer dont la fiche sera supprimée (délai d'une heure, agent muet). */
+  pendingRemoval: string[];
   /** Groupes TeamViewer suivis (TEAMVIEWER_GROUPS) et ceux effectivement trouvés dans le compte. */
   groups: { wanted: string[]; found: string[] };
   /** Appareils des groupes suivis sans agent de supervision (aucun serveur avec cet ID TeamViewer). */
@@ -46,6 +50,8 @@ export const tvStatus: TeamViewerStatus = {
   matched: 0,
   updated: 0,
   unmatched: [],
+  removed: [],
+  pendingRemoval: [],
   groups: { wanted: [], found: [] },
   toDeploy: [],
 };
@@ -123,15 +129,60 @@ async function managedDevices<T = ManagedDevice>(path: string): Promise<T[]> {
   return out;
 }
 
-export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promise<TeamViewerStatus> {
+// Suppression des fiches dont l'appareil a disparu de TeamViewer : après une heure d'absence
+// (plusieurs synchronisations, pour ne pas réagir à un incident de l'API), agent muet depuis
+// 10 minutes, et jamais plus de MAX_REMOVALS fiches d'un coup.
+const MISSING_GRACE_MS = 3600_000;
+const SILENT_MS = 10 * 60_000;
+const MAX_REMOVALS = 3;
+
+let running: Promise<TeamViewerStatus> | null = null;
+let again = false;
+let timer: NodeJS.Timeout | null = null;
+
+/** Synchronisation, une seule à la fois : un appel pendant qu'elle tourne en relance une à la suite. */
+export function syncTeamViewer(db: Db, log: (msg: string) => void): Promise<TeamViewerStatus> {
+  if (running) {
+    again = true;
+    return running;
+  }
+  running = run(db, log).finally(() => {
+    running = null;
+    if (again) {
+      again = false;
+      void syncTeamViewer(db, log);
+    }
+  });
+  return running;
+}
+
+/** Synchronisation dans quelques secondes (nouvel agent) ; les demandes rapprochées n'en font qu'une. */
+export function requestTeamViewerSync(db: Db, log: (msg: string) => void, delayMs = 5000): void {
+  if (!config.teamviewerApiToken) return;
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => {
+    timer = null;
+    void syncTeamViewer(db, log);
+  }, delayMs);
+  timer.unref?.();
+}
+
+type Source = 'devices' | 'managed' | 'company' | 'groups';
+
+async function run(db: Db, log: (msg: string) => void): Promise<TeamViewerStatus> {
   tvStatus.enabled = Boolean(config.teamviewerApiToken);
   if (!tvStatus.enabled) return tvStatus;
   try {
-    const aliases = new Map<string, string>();
-    const add = (id: unknown, alias: unknown) => {
+    // ID TeamViewer : nom, et listes où il figure.
+    const aliases = new Map<string, { alias: string; sources: Set<Source> }>();
+    const failed = new Set<Source>();
+    const add = (id: unknown, alias: unknown, source: Source) => {
       const k = digits(id);
       const a = String(alias ?? '').trim();
-      if (k && a && !aliases.has(k)) aliases.set(k, a.slice(0, 200));
+      if (!k || !a) return;
+      const e = aliases.get(k);
+      if (e) e.sources.add(source);
+      else aliases.set(k, { alias: a.slice(0, 200), sources: new Set([source]) });
     };
     // « Ordinateurs et contacts » : source principale, une erreur ici arrête la synchronisation.
     const body = await tvGet<{
@@ -145,8 +196,8 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
       }[];
     }>('/devices');
     for (const d of body.devices ?? []) {
-      add(d.remotecontrol_id, d.alias);
-      add(d.teamviewer_id, d.alias);
+      add(d.remotecontrol_id, d.alias, 'devices');
+      add(d.teamviewer_id, d.alias, 'devices');
     }
     const warnings: string[] = [];
     // Noms des groupes de la liste « Ordinateurs et contacts » (droit « Gestion des groupes »).
@@ -161,39 +212,77 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
     // Appareils gérés (personnels puis de l'entreprise) : facultatifs, ils demandent le droit de
     // lecture « Gestion des appareils » sur le jeton.
     const managedErrors: string[] = [];
-    for (const path of ['/managed/devices', '/managed/devices/company']) {
+    for (const [path, source] of [
+      ['/managed/devices', 'managed'],
+      ['/managed/devices/company', 'company'],
+    ] as const) {
       try {
-        for (const d of await managedDevices(path)) add(d.teamviewerId, d.name);
+        for (const d of await managedDevices(path)) add(d.teamviewerId, d.name, source);
       } catch (e) {
+        failed.add(source);
         managedErrors.push((e as Error).message);
       }
     }
     const managedWarning = managedErrors.length
       ? `appareils gérés non lus (${managedErrors.join(' ; ')}) : ajouter au jeton le droit de lecture « Gestion des appareils »`
       : null;
+    // Groupes d'appareils gérés suivis (droit « Groupes d'appareils ») : leurs appareils servent
+    // aussi à retrouver les serveurs, et alimentent la liste des agents à déployer.
+    const wanted = config.teamviewerGroups;
+    const managedGroups: { name: string; devices: ManagedDevice[] }[] = [];
+    let managedGroupsError: string | null = null;
+    try {
+      for (const g of await managedDevices<{ id?: string; name?: string }>('/managed/groups')) {
+        if (!g.id || !g.name || !wanted.includes(g.name.toLowerCase())) continue;
+        const devices = await managedDevices(`/managed/groups/${encodeURIComponent(g.id)}/devices`);
+        managedGroups.push({ name: g.name, devices });
+      }
+    } catch (e) {
+      managedGroupsError = (e as Error).message;
+      failed.add('groups');
+      managedGroups.length = 0;
+    }
+    for (const g of managedGroups) for (const d of g.devices) add(d.teamviewerId, d.name, 'groups');
 
     const rows = await db.query<{
       id: string;
       hostname: string;
       tv: string;
       display_name: string | null;
+      name_source: string | null;
       client_id: number | null;
       client_name: string | null;
+      last_seen: Date | null;
+      tv_sources: string | null;
+      tv_missing_since: Date | null;
     }>(
-      `SELECT s.id, s.hostname, s.snapshot->>'teamviewerId' AS tv, s.display_name, s.client_id, c.name AS client_name
+      `SELECT s.id, s.hostname, s.snapshot->>'teamviewerId' AS tv, s.display_name, s.name_source, s.client_id,
+              c.name AS client_name, s.last_seen, s.tv_sources, s.tv_missing_since
          FROM servers s LEFT JOIN clients c ON c.id = s.client_id
         WHERE s.snapshot->>'teamviewerId' IS NOT NULL`,
     );
     let matched = 0;
     let updated = 0;
     const unmatched: string[] = [];
+    const missing: typeof rows = [];
     for (const r of rows) {
-      const alias = aliases.get(digits(r.tv));
-      if (!alias) {
-        unmatched.push(`${r.hostname} (${digits(r.tv)})`);
+      const entry = aliases.get(digits(r.tv));
+      if (!entry) {
+        unmatched.push(`${r.display_name || r.hostname} (${digits(r.tv)})`);
+        // Déjà vu dans TeamViewer, et toutes les listes où il figurait ont été lues : il a disparu.
+        const seenIn = (r.tv_sources ?? '').split(',').filter(Boolean);
+        if (seenIn.length && seenIn.every((x) => !failed.has(x as Source))) {
+          if (!r.tv_missing_since) await db.query('UPDATE servers SET tv_missing_since = now() WHERE id = $1', [r.id]);
+          missing.push({ ...r, tv_missing_since: r.tv_missing_since ?? new Date() });
+        }
         continue;
       }
       matched++;
+      const alias = entry.alias;
+      // Listes où il figure ; celles qui n'ont pas pu être lues gardent leur valeur précédente.
+      const kept = (r.tv_sources ?? '').split(',').filter((x) => failed.has(x as Source));
+      const sources = [...new Set<string>([...entry.sources, ...kept])].sort().join(',');
+
       let clientId: number | null = null;
       // Client fait uniquement de numéros (« k15 - 3.4 », déduit par la v0.4.4) : remplacé.
       const badClient = r.client_name !== null && isVersionOnly(r.client_name);
@@ -205,27 +294,56 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
         );
         clientId = c.id;
       }
-      if (!r.display_name || clientId !== null) {
+      // Nom : celui de TeamViewer, sauf saisie dans la console. Origine inconnue (fiches d'avant la
+      // v0.8.0) : un nom différent du nom TeamViewer est considéré comme saisi à la main.
+      const fromTv = !r.display_name || r.display_name === alias || r.display_name === alias.slice(0, 100);
+      const nameSource = r.name_source ?? (fromTv ? 'tv' : 'manual');
+      const name = nameSource === 'tv' ? alias.slice(0, 100) : r.display_name;
+      const changed = name !== r.display_name || clientId !== null;
+      if (changed || nameSource !== r.name_source || sources !== r.tv_sources || r.tv_missing_since) {
         await db.query(
-          `UPDATE servers SET display_name = COALESCE(display_name, $2),
+          `UPDATE servers SET display_name = $2, name_source = $5, tv_sources = $6, tv_missing_since = NULL,
                   client_id = CASE WHEN $4::boolean THEN COALESCE($3, client_id) ELSE COALESCE(client_id, $3) END
             WHERE id = $1`,
-          [r.id, alias, clientId, badClient],
+          [r.id, name, clientId, badClient, nameSource, sources],
         );
-        updated++;
+      }
+      if (changed) updated++;
+    }
+
+    // Fiches dont l'appareil a disparu de TeamViewer depuis assez longtemps, agent muet.
+    const now = Date.now();
+    const label = (r: (typeof rows)[number]) => r.display_name || r.hostname;
+    const active = (r: (typeof rows)[number]) => r.last_seen !== null && now - new Date(r.last_seen).getTime() < SILENT_MS;
+    const due = missing.filter((r) => now - new Date(r.tv_missing_since!).getTime() >= MISSING_GRACE_MS && !active(r));
+    const removed: string[] = [];
+    if (due.length > MAX_REMOVALS) {
+      warnings.push(
+        `${due.length} serveurs ont disparu de TeamViewer (${due.map(label).join(', ')}) : trop pour une suppression automatique, les supprimer à la main s'il le faut`,
+      );
+    } else {
+      for (const r of due) {
+        await db.query('DELETE FROM servers WHERE id = $1', [r.id]);
+        removed.push(label(r));
+        log(`Synchronisation TeamViewer : ${label(r)} (${digits(r.tv)}) supprimé, absent de TeamViewer`);
       }
     }
+    const pendingRemoval = missing
+      .filter((r) => !removed.includes(label(r)))
+      .map((r) => (active(r) ? `${label(r)} (agent encore actif)` : label(r)));
+
     const orphans = await db.query<{ id: number; name: string }>(
       'SELECT id, name FROM clients c WHERE NOT EXISTS (SELECT 1 FROM servers s WHERE s.client_id = c.id)',
     );
     for (const o of orphans) if (isVersionOnly(o.name)) await db.query('DELETE FROM clients WHERE id = $1', [o.id]);
 
     // Agents à déployer : appareils des groupes suivis dont l'ID n'est remonté par aucun agent.
-    const equipped = new Set(rows.map((r) => digits(r.tv)));
-    const names = await db.query<{ id: string; name: string }>('SELECT id, COALESCE(display_name, hostname) AS name FROM servers');
+    const names = await db.query<{ tv: string | null; name: string }>(
+      `SELECT snapshot->>'teamviewerId' AS tv, COALESCE(display_name, hostname) AS name FROM servers`,
+    );
+    const equipped = new Set(names.map((n) => digits(n.tv)).filter(Boolean));
     const byName = new Map(names.map((n) => [n.name.trim().toLowerCase(), n.name]));
     const ignored = new Set((await db.query<{ tv_id: string }>('SELECT tv_id FROM tv_ignored')).map((r) => r.tv_id));
-    const wanted = config.teamviewerGroups;
     const found = new Set<string>();
     const toDeploy: TvCandidate[] = [];
     const seen = new Set<string>();
@@ -259,19 +377,12 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
         d.last_seen ?? null,
       );
     }
-    // 2. Groupes d'appareils gérés (droit « Groupes d'appareils »), du même nom.
-    let managedGroupsError: string | null = null;
-    try {
-      const groups = await managedDevices<{ id?: string; name?: string }>('/managed/groups');
-      for (const g of groups) {
-        if (!g.id || !g.name || !wanted.includes(g.name.toLowerCase())) continue;
-        found.add(g.name);
-        for (const d of await managedDevices(`/managed/groups/${encodeURIComponent(g.id)}/devices`)) {
-          consider([d.teamviewerId], d.name, g.name, typeof d.isOnline === 'boolean' ? d.isOnline : null, d.lastSeen ?? null);
-        }
+    // 2. Groupes d'appareils gérés du même nom.
+    for (const g of managedGroups) {
+      found.add(g.name);
+      for (const d of g.devices) {
+        consider([d.teamviewerId], d.name, g.name, typeof d.isOnline === 'boolean' ? d.isOnline : null, d.lastSeen ?? null);
       }
-    } catch (e) {
-      managedGroupsError = (e as Error).message;
     }
     toDeploy.sort((a, b) => Number(b.online) - Number(a.online) || a.alias.localeCompare(b.alias, 'fr'));
     if (groupsError && managedGroupsError) {
@@ -281,7 +392,6 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
     } else if (!found.size) {
       warnings.push(`aucun groupe TeamViewer nommé ${wanted.join(' ou ')} : renseigner TEAMVIEWER_GROUPS dans le .env`);
     }
-    const groupWarning = warnings.length ? `agents à déployer : ${warnings.join(' ; ')}` : null;
 
     Object.assign(tvStatus, {
       groups: { wanted, found: [...found] },
@@ -292,8 +402,10 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
       matched,
       updated,
       unmatched,
+      removed: [...tvStatus.removed.filter((x) => !removed.includes(x)), ...removed].slice(-20),
+      pendingRemoval,
       // Le droit manquant ne gêne que si des serveurs restent introuvables.
-      warning: [unmatched.length ? managedWarning : null, groupWarning].filter(Boolean).join(' — ') || null,
+      warning: [unmatched.length ? managedWarning : null, ...warnings].filter(Boolean).join(' — ') || null,
     });
   } catch (e) {
     tvStatus.lastSyncAt = new Date().toISOString();

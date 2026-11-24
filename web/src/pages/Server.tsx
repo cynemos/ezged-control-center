@@ -588,6 +588,13 @@ function EditForm({ s, onDone }: { s: Detail; onDone: () => void }) {
         <label className="space-y-1">
           <span className="text-xs text-muted">Nom affiché</span>
           <input className="w-full" placeholder={s.hostname} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+          {s.teamviewerId && (
+            <span className="block text-xs text-muted">
+              {s.nameManual
+                ? 'Saisi à la main : TeamViewer ne le change plus. Vider pour reprendre le nom TeamViewer.'
+                : 'Suit le nom TeamViewer ; une modification ici le fige.'}
+            </span>
+          )}
         </label>
         <label className="space-y-1">
           <span className="text-xs text-muted">Client</span>

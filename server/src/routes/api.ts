@@ -15,6 +15,7 @@ interface ServerRow {
   id: string;
   hostname: string;
   display_name: string | null;
+  name_source: string | null;
   client_id: number | null;
   client_name: string | null;
   rustdesk_id: string | null;
@@ -70,7 +71,7 @@ function health(r: ServerRow): { key: string; label: string; state: Light }[] {
 }
 
 const SERVER_SELECT = `
-  SELECT s.id, s.hostname, s.display_name, s.client_id, c.name AS client_name, s.rustdesk_id, s.notes,
+  SELECT s.id, s.hostname, s.display_name, s.name_source, s.client_id, c.name AS client_name, s.rustdesk_id, s.notes,
          s.enrolled_at, s.last_seen, s.last_ip, s.agent_version, s.snapshot, s.inventory, s.inventory_at, s.disk_full_days,
          (SELECT count(*)::int FROM alerts a WHERE a.server_id = s.id AND a.closed_at IS NULL AND a.severity = 'critical') AS crit,
          (SELECT count(*)::int FROM alerts a WHERE a.server_id = s.id AND a.closed_at IS NULL AND a.severity = 'warning') AS warn,
@@ -92,6 +93,7 @@ function summary(r: ServerRow) {
   return {
     id: r.id,
     name: r.display_name || r.hostname,
+    nameManual: r.name_source === 'manual',
     hostname: r.hostname,
     client: r.client_name,
     status: status(r),
@@ -262,8 +264,12 @@ export function apiRoutes(app: FastifyInstance, db: Db) {
             clientId = c.id;
           } else clientId = null;
         }
+        // Nom modifié : saisi à la main, la synchronisation TeamViewer ne le touche plus. Nom vidé :
+        // la synchronisation suivante reprend le nom TeamViewer. Nom inchangé : origine conservée.
         await db.query(
           `UPDATE servers SET
+             name_source  = CASE WHEN NOT $2::boolean OR display_name IS NOT DISTINCT FROM $3 THEN name_source
+                                 WHEN $3 IS NULL THEN NULL ELSE 'manual' END,
              display_name = CASE WHEN $2::boolean THEN $3 ELSE display_name END,
              client_id    = CASE WHEN $4::boolean THEN $5::int ELSE client_id END,
              rustdesk_id  = CASE WHEN $6::boolean THEN $7 ELSE rustdesk_id END,

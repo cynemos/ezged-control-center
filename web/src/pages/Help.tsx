@@ -83,7 +83,7 @@ export default function Help() {
                 (à la main ou par script TeamViewer).
               </li>
               <li>
-                Le serveur apparaît dans le Parc sous une minute. Son nom et son client sont repris de TeamViewer, ou à saisir sur sa fiche.
+                Le serveur apparaît dans le Parc sous une minute, avec le nom et le client repris de TeamViewer (ou à saisir sur sa fiche).
               </li>
               <li>
                 Suivre ce qui reste à équiper dans{' '}
@@ -192,9 +192,23 @@ export default function Help() {
 
           <Section id="teamviewer" title="TeamViewer">
             <p>
-              Avec <code>TEAMVIEWER_API_TOKEN</code> dans le <code>.env</code>, la console lit le compte TeamViewer tous les quarts d’heure
-              : noms et clients des fiches vides, et liste des agents à déployer. Droits de lecture à donner au jeton de script :
+              Avec <code>TEAMVIEWER_API_TOKEN</code> dans le <code>.env</code>, la console lit le compte TeamViewer tous les quarts d’heure,
+              et une minute environ après l’installation d’un nouvel agent. Le bouton « Synchroniser » la lance tout de suite.
             </p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                <b>Nom</b> : suit le nom TeamViewer, renommages compris. Un nom modifié sur la fiche est figé ; le vider fait reprendre
+                le nom TeamViewer.
+              </li>
+              <li>
+                <b>Client</b> : déduit du nom TeamViewer pour les fiches sans client ; un client saisi n’est jamais écrasé.
+              </li>
+              <li>
+                <b>Suppression</b> : un appareil supprimé de TeamViewer voit sa fiche supprimée une heure plus tard, si son agent ne
+                remonte plus. Pas plus de 3 suppressions d’un coup, et aucune si une liste TeamViewer n’a pas pu être lue.
+              </li>
+            </ul>
+            <p>Droits de lecture à donner au jeton de script :</p>
             <ul className="list-disc space-y-1 pl-5">
               <li>« Ordinateurs et contacts » : noms des appareils ;</li>
               <li>« Gestion des appareils » : appareils gérés ;</li>

@@ -88,6 +88,13 @@ CREATE TABLE IF NOT EXISTS tv_ignored (
   alias       TEXT,
   ignored_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Origine du nom affiché : 'tv' (suit le nom TeamViewer), 'manual' (saisi dans la console, jamais
+-- écrasé), NULL (inconnue, tranchée à la synchronisation suivante).
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS name_source TEXT;
+-- Listes TeamViewer où l'appareil a été vu (« devices,managed »), et depuis quand il n'y est plus :
+-- la fiche est supprimée quand l'appareil a disparu de TeamViewer depuis une heure.
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS tv_sources TEXT;
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS tv_missing_since TIMESTAMPTZ;
 `;
 
 export async function openDb(): Promise<Db> {

@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import type { Db } from '../db.js';
 import { bootstrapScript, consumeDeployToken, deployTokenValid } from '../deploy.js';
 import { normalizeSnapshot } from '../normalize.js';
+import { requestTeamViewerSync } from '../teamviewer.js';
 import type { AgentReport, Inventory } from '../types.js';
 
 const INVENTORY_INTERVAL_MIN = 60;
@@ -72,12 +73,12 @@ function clampPct(n: unknown): number | null {
 }
 
 export function agentRoutes(app: FastifyInstance, db: Db) {
-  async function authAgent(req: FastifyRequest): Promise<{ id: string; inventory: Inventory | null } | null> {
+  async function authAgent(req: FastifyRequest): Promise<{ id: string; inventory: Inventory | null; tv: string | null } | null> {
     const h = req.headers.authorization ?? '';
     const token = h.startsWith('Bearer ') ? h.slice(7).trim() : '';
     if (!token) return null;
-    const [row] = await db.query<{ id: string; inventory: Inventory | null }>(
-      'SELECT id, inventory FROM servers WHERE token_hash = $1',
+    const [row] = await db.query<{ id: string; inventory: Inventory | null; tv: string | null }>(
+      "SELECT id, inventory, snapshot->>'teamviewerId' AS tv FROM servers WHERE token_hash = $1",
       [sha256(token)],
     );
     return row ?? null;
@@ -156,6 +157,11 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
         WHERE id = $1`,
       [server.id, req.ip, snapshot.agentVersion ?? null, snapshot.hostname ?? null, JSON.stringify(snapshot)],
     );
+
+    // Nouvel agent, ou ID TeamViewer changé : synchronisation TeamViewer sans attendre le quart
+    // d'heure, pour le nom et le client de la fiche et la liste des agents à déployer.
+    const tvId = String(snapshot.teamviewerId ?? '').replace(/\D/g, '');
+    if (tvId && tvId !== String(server.tv ?? '').replace(/\D/g, '')) requestTeamViewerSync(db, (msg) => req.log.warn(msg));
 
     // Serveurs enrôlés avant l'ajout de machine_id : renseigné au premier rapport qui le fournit,
     // sauf si une autre fiche porte déjà cet identifiant.

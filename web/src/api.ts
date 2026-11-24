@@ -39,6 +39,8 @@ export interface ServerSummary {
   id: string;
   name: string;
   hostname: string;
+  /** Nom saisi dans la console : la synchronisation TeamViewer ne le change plus. */
+  nameManual: boolean;
   client: string | null;
   status: Status;
   lastSeen: string | null;

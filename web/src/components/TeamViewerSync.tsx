@@ -13,9 +13,12 @@ interface Status {
   matched: number;
   updated: number;
   unmatched: string[];
+  removed?: string[];
+  pendingRemoval?: string[];
 }
 
-// Noms TeamViewer : les fiches sans nom ni client les reprennent du compte TeamViewer.
+// Noms TeamViewer : les fiches suivent le nom TeamViewer (sauf nom saisi à la main), le client des
+// fiches vides en est déduit ; une fiche dont l'appareil a disparu de TeamViewer est supprimée.
 export default function TeamViewerSync() {
   const { data, reload } = usePoll<Status>('/api/teamviewer', 60_000);
   const [busy, setBusy] = useState(false);
@@ -58,9 +61,17 @@ export default function TeamViewerSync() {
         ) : data.lastSyncAt ? (
           <p>
             Dernière synchronisation {dateTime(data.lastSyncAt)} : {data.devices} appareil(s) TeamViewer, {data.matched} serveur(s) reconnu(s),{' '}
-            {data.updated} fiche(s) complétée(s).
+            {data.updated} fiche(s) mise(s) à jour.
             {data.unmatched.length > 0 && (
               <span className="mt-1 block text-muted">Absents des listes TeamViewer lues : {data.unmatched.join(', ')}.</span>
+            )}
+            {!!data.pendingRemoval?.length && (
+              <span className="mt-1 block text-warn">
+                Disparus de TeamViewer, fiche supprimée après une heure si l'agent reste muet : {data.pendingRemoval.join(', ')}.
+              </span>
+            )}
+            {!!data.removed?.length && (
+              <span className="mt-1 block text-muted">Supprimés car absents de TeamViewer : {data.removed.join(', ')}.</span>
             )}
             {data.warning && <span className="mt-1 block text-warn">{data.warning}</span>}
           </p>
