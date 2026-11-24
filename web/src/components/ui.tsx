@@ -103,7 +103,7 @@ export function Gauge({ value, warn = 80, crit = 90 }: { value: number | null | 
   const c = levelColor(value, warn, crit);
   return (
     <span className="inline-flex items-center gap-2">
-      <span className="relative inline-block h-1.5 w-16 overflow-hidden rounded-full bg-white/[0.06]">
+      <span className="relative inline-block h-1.5 w-10 overflow-hidden 2xl:w-16 rounded-full bg-white/[0.06]">
         <span
           className="absolute inset-y-0 left-0 rounded-full"
           style={{ width: `${Math.max(2, Math.min(100, value))}%`, background: c, boxShadow: `0 0 8px ${c}` }}

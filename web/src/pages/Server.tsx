@@ -360,6 +360,7 @@ export default function Server() {
               </li>
             ))}
           </ul>
+          {!Object.keys(snap.queues ?? {}).length && !snap.db && <p className="text-sm text-muted">Pas encore de données.</p>}
           {snap.db && (
             <div className="mt-3 border-t border-line pt-3 text-sm">
               {snap.db.ok ? (

@@ -51,7 +51,7 @@ function Tile({ s, i }: { s: ServerSummary; i: number }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate text-[11px] font-medium uppercase tracking-wider text-muted">{s.client ?? 'client non affecté'}</div>
-          <div className="truncate text-[15px] font-semibold transition group-hover:text-accent" title={s.name}>
+          <div className="line-clamp-2 min-h-[2.5em] break-words text-[15px] font-semibold leading-tight transition group-hover:text-accent" title={s.name}>
             {s.name}
           </div>
           <div className="truncate text-[11px] text-muted">
@@ -317,7 +317,7 @@ export default function Fleet() {
                 <th>Disque max</th>
                 <th>Dump</th>
                 <th>Veeam</th>
-                <th className="min-w-[200px]">Santé</th>
+                <th className="min-w-[180px]">Santé</th>
                 <th>EzGED</th>
                 <th>Alertes</th>
                 <th>Contact</th>
@@ -330,7 +330,7 @@ export default function Fleet() {
                     <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full" style={{ background: STATUS_HEX[s.status] }} />
                     <StatusBadge status={s.status} />
                   </td>
-                  <td className="max-w-[340px]">
+                  <td className="max-w-[260px] 2xl:max-w-[340px]">
                     <Link to={`/serveurs/${s.id}`} className="block truncate font-medium text-text transition group-hover:text-accent" title={s.name}>
                       {s.name}
                     </Link>

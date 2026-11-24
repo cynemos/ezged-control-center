@@ -13,7 +13,7 @@ export default function Enroll() {
   const cmd = `powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl ${data.publicUrl} -EnrollKey ${data.enrollKey}`;
 
   return (
-    <div className="max-w-3xl space-y-4">
+    <div className="max-w-4xl space-y-4">
       <PageHeader title="Ajouter un serveur" subtitle="Installer l'agent à la main, ou le déployer sur tout le parc par script." />
       <Card title="Installer l'agent sur un serveur EzGED">
         <ol className="list-decimal space-y-3 pl-5 text-sm">

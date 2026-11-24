@@ -104,68 +104,71 @@ body::before {
   color: transparent;
 }
 
-input,
-select,
-textarea {
-  background: rgb(10 16 28 / 0.7);
-  border: 1px solid var(--color-line);
-  border-radius: 8px;
-  padding: 7px 11px;
-  color: var(--color-text);
-  outline: none;
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
-}
-input:focus,
-select:focus,
-textarea:focus {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px rgb(76 154 255 / 0.18);
-}
-button:focus-visible,
-a:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  border-radius: 6px;
-}
+/* En couche base : les classes utilitaires (padding, retour à la ligne…) gardent la priorité. */
+@layer base {
+  input,
+  select,
+  textarea {
+    background: rgb(10 16 28 / 0.7);
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+    padding: 7px 11px;
+    color: var(--color-text);
+    outline: none;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
+  }
+  input:focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgb(76 154 255 / 0.18);
+  }
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
 
-code {
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-  font-size: 0.92em;
-}
+  code {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 0.92em;
+  }
 
-table {
-  border-collapse: separate;
-  border-spacing: 0;
-  width: 100%;
-}
-th {
-  text-align: left;
-  font-weight: 600;
-  color: var(--color-muted);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--color-line);
-  white-space: nowrap;
-  background: rgb(10 16 28 / 0.55);
-}
-td {
-  padding: 10px 12px;
-  border-bottom: 1px solid rgb(32 48 75 / 0.6);
-  white-space: nowrap;
-  vertical-align: middle;
-}
-tbody tr:last-child td {
-  border-bottom: 0;
-}
-tbody tr {
-  transition: background 0.12s;
-}
-tbody tr:hover {
-  background: rgb(76 154 255 / 0.06);
+  table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+  }
+  th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--color-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--color-line);
+    white-space: nowrap;
+    background: rgb(10 16 28 / 0.55);
+  }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgb(32 48 75 / 0.6);
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  tbody tr {
+    transition: background 0.12s;
+  }
+  tbody tr:hover {
+    background: rgb(76 154 255 / 0.06);
+  }
 }
 
 ::-webkit-scrollbar {

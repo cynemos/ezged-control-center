@@ -57,9 +57,9 @@ export default function DeployTokens() {
       <div className="space-y-4 text-sm">
         <p className="text-muted">
           Génère un script PowerShell à enregistrer dans TeamViewer (Remote Management, Scripts : type PowerShell, « Exécuter en tant
-          qu'administrateur »), puis à lancer sur un groupe d'appareils. Il télécharge l'installeur depuis la console et enregistre le serveur avec
-          un jeton limité en durée et en nombre d'installations. Relancé sur un serveur déjà équipé, il met l'agent à jour sans consommer
-          d'installation.
+          qu'administrateur »), puis à lancer sur un groupe d'appareils. Il télécharge l'installeur depuis la console et enregistre le
+          serveur avec un jeton limité en durée et en nombre d'installations. Relancé sur un serveur déjà équipé, il met l'agent à jour sans
+          consommer d'installation.
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <label className="space-y-1">
@@ -83,8 +83,8 @@ export default function DeployTokens() {
         {script && (
           <div className="space-y-2 rounded-xl border border-warn/50 bg-warn/5 p-3">
             <p className="text-xs text-warn">
-              Script affiché une seule fois : la console ne garde que l'empreinte du jeton. Tant qu'il est actif, ce script peut enregistrer un serveur :
-              ne le diffusez pas et révoquez le jeton une fois le déploiement terminé.
+              Script affiché une seule fois : la console ne garde que l'empreinte du jeton. Tant qu'il est actif, ce script peut enregistrer
+              un serveur : ne le diffusez pas et révoquez le jeton une fois le déploiement terminé.
             </p>
             <pre className="overflow-x-auto rounded-lg border border-line bg-black/30 p-3 text-xs">{script}</pre>
             <div className="flex gap-3 text-xs">
@@ -99,56 +99,58 @@ export default function DeployTokens() {
         )}
 
         {data && data.length > 0 && (
-          <table className="w-full text-left text-xs">
-            <thead className="text-muted">
-              <tr>
-                <th className="py-1 pr-2 font-normal">Jeton</th>
-                <th className="py-1 pr-2 font-normal">Expire</th>
-                <th className="py-1 pr-2 font-normal">Installations</th>
-                <th className="py-1 pr-2 font-normal">Serveurs</th>
-                <th className="py-1 font-normal" />
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((t) => {
-                const st = state(t);
-                return (
-                  <tr key={t.id} className="border-t border-line align-top">
-                    <td className="py-1.5 pr-2">
-                      <div>{t.label}</div>
-                      <div className="text-muted">créé {dateTime(t.createdAt)}</div>
-                    </td>
-                    <td className="py-1.5 pr-2">{dateTime(t.expiresAt)}</td>
-                    <td className="py-1.5 pr-2">
-                      {t.uses} / {t.maxUses}
-                    </td>
-                    <td className="py-1.5 pr-2">
-                      {t.servers.length
-                        ? t.servers.map((s, i) => (
-                            <span key={s.id}>
-                              {i > 0 && ', '}
-                              <Link className="text-accent" to={`/serveurs/${s.id}`}>
-                                {s.name}
-                              </Link>
-                            </span>
-                          ))
-                        : '—'}
-                    </td>
-                    <td className="py-1.5 text-right">
-                      <span className="inline-flex items-center gap-2">
-                        <Pill tone={st.tone}>{st.label}</Pill>
-                        {st.label === 'actif' && (
-                          <button className="text-crit" onClick={() => revoke(t)}>
-                            Révoquer
-                          </button>
-                        )}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="-mx-1 overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="text-muted">
+                <tr>
+                  <th className="py-1 pr-2 font-normal">Jeton</th>
+                  <th className="py-1 pr-2 font-normal">Expire</th>
+                  <th className="py-1 pr-2 font-normal">Installations</th>
+                  <th className="py-1 pr-2 font-normal">Serveurs</th>
+                  <th className="py-1 font-normal" />
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((t) => {
+                  const st = state(t);
+                  return (
+                    <tr key={t.id} className="border-t border-line align-top">
+                      <td className="py-1.5 pr-2">
+                        <div>{t.label}</div>
+                        <div className="text-muted">créé {dateTime(t.createdAt)}</div>
+                      </td>
+                      <td className="py-1.5 pr-2">{dateTime(t.expiresAt)}</td>
+                      <td className="py-1.5 pr-2">
+                        {t.uses} / {t.maxUses}
+                      </td>
+                      <td className="min-w-[220px] whitespace-normal py-1.5 pr-2 leading-relaxed">
+                        {t.servers.length
+                          ? t.servers.map((s, i) => (
+                              <span key={s.id}>
+                                {i > 0 && ', '}
+                                <Link className="text-accent" to={`/serveurs/${s.id}`}>
+                                  {s.name}
+                                </Link>
+                              </span>
+                            ))
+                          : '—'}
+                      </td>
+                      <td className="py-1.5 text-right">
+                        <span className="inline-flex items-center gap-2">
+                          <Pill tone={st.tone}>{st.label}</Pill>
+                          {st.label === 'actif' && (
+                            <button className="text-crit" onClick={() => revoke(t)}>
+                              Révoquer
+                            </button>
+                          )}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </Card>
