@@ -13,6 +13,7 @@ export interface TvCandidate {
   online: boolean | null;
   lastSeen: string | null;
   ignored: boolean;
+  sameNameAs?: string | null;
 }
 
 export interface TvStatus {
@@ -138,7 +139,17 @@ export default function ToDeploy() {
                         <Pill tone="muted">hors ligne</Pill>
                       )}
                     </td>
-                    <td className="min-w-[200px] max-w-[360px] whitespace-normal font-medium">{c.alias}</td>
+                    <td className="min-w-[200px] max-w-[360px] whitespace-normal">
+                      <div className="font-medium">{c.alias}</div>
+                      {c.sameNameAs && (
+                        <div
+                          className="mt-0.5 text-[11px] text-warn"
+                          title="Un serveur supervisé porte ce nom avec un autre ID TeamViewer : ancien appareil, ancien ID ou machine hôte"
+                        >
+                          Même nom qu'un serveur supervisé, autre ID : à vérifier
+                        </div>
+                      )}
+                    </td>
                     <td className="text-muted">{c.client ?? '—'}</td>
                     <td className="font-mono text-xs text-muted">{copied === c.tvId ? 'ID copié' : spaced(c.tvId)}</td>
                     <td className="text-xs text-muted" title={dateTime(c.lastSeen)}>

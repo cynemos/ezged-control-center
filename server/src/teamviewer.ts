@@ -33,6 +33,8 @@ export interface TvCandidate {
   online: boolean | null;
   lastSeen: string | null;
   ignored: boolean;
+  /** Nom identique à un serveur déjà supervisé : sans doute un ancien appareil ou un ancien ID TeamViewer. */
+  sameNameAs: string | null;
 }
 
 export const tvStatus: TeamViewerStatus = {
@@ -48,12 +50,16 @@ export const tvStatus: TeamViewerStatus = {
   toDeploy: [],
 };
 
-// Segment de numérotation en tête des noms TeamViewer : « 15 », « 3.5 », « k15 ».
-const VERSION = /^[a-z]?\d+(?:\.\d+)*$/i;
+// Segment de numérotation en tête des noms TeamViewer : « 15 », « 3.5 », « k15 », « 3.2# ».
+const VERSION = /^[a-z]?\d+(?:\.\d+)*#?$/i;
+// Même numérotation collée au nom, sans tiret : « 3.5 CAMPING FRONT DE MER ».
+const VERSION_PREFIX = /^[a-z]?\d+(?:\.\d+)*#?\s+/i;
+// Séparateur « - » entouré d'au moins un espace (« 3.5- ECBA ») ; « Saint-Jean » n'est pas coupé.
+const SEP = /\s*-\s+|\s+-\s*/;
 
 /** Nom fait uniquement de numéros (« k15 - 3.4 ») : pas un vrai client. */
 export function isVersionOnly(name: string): boolean {
-  return name.split(/\s+-\s+/).every((p) => VERSION.test(p.trim()));
+  return name.split(SEP).every((p) => VERSION.test(p.trim()));
 }
 
 /**
@@ -65,10 +71,11 @@ export function isVersionOnly(name: string): boolean {
 export function clientFromAlias(alias: string): string | null {
   const parts = alias
     .replace(/\s*\([^)]*\)?/g, ' ')
-    .split(/\s+-\s+/)
+    .split(SEP)
     .map((p) => p.trim())
     .filter(Boolean);
   while (parts.length > 1 && VERSION.test(parts[0])) parts.shift();
+  if (parts.length) parts[0] = parts[0].replace(VERSION_PREFIX, '');
   if (parts.length > 1) parts.pop();
   const name = parts.join(' - ').replace(/\s+/g, ' ').trim();
   return name && !isVersionOnly(name) ? name.slice(0, 100) : null;
@@ -215,6 +222,8 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
 
     // Agents à déployer : appareils des groupes suivis dont l'ID n'est remonté par aucun agent.
     const equipped = new Set(rows.map((r) => digits(r.tv)));
+    const names = await db.query<{ id: string; name: string }>('SELECT id, COALESCE(display_name, hostname) AS name FROM servers');
+    const byName = new Map(names.map((n) => [n.name.trim().toLowerCase(), n.name]));
     const ignored = new Set((await db.query<{ tv_id: string }>('SELECT tv_id FROM tv_ignored')).map((r) => r.tv_id));
     const wanted = config.teamviewerGroups;
     const found = new Set<string>();
@@ -226,7 +235,16 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
       if (!tvId || ids.some((i) => seen.has(i) || equipped.has(i))) return;
       ids.forEach((i) => seen.add(i));
       const alias = String(rawAlias ?? '').trim() || tvId;
-      toDeploy.push({ tvId, alias, client: clientFromAlias(alias), group, online, lastSeen, ignored: ids.some((i) => ignored.has(i)) });
+      toDeploy.push({
+        tvId,
+        alias,
+        client: clientFromAlias(alias),
+        group,
+        online,
+        lastSeen,
+        ignored: ids.some((i) => ignored.has(i)),
+        sameNameAs: byName.get(alias.toLowerCase()) ?? null,
+      });
     };
     // 1. Groupes de la liste « Ordinateurs et contacts ».
     for (const d of body.devices ?? []) {
