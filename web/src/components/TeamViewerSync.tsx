@@ -51,7 +51,7 @@ export default function TeamViewerSync() {
         {!data.enabled ? (
           <p>
             Désactivé : ajouter <code>TEAMVIEWER_API_TOKEN</code> dans le <code>.env</code> de la console (jeton de script TeamViewer, droit de
-            lecture « Ordinateurs et contacts » et « Gestion des appareils » uniquement), puis redémarrer le service.
+            lecture « Ordinateurs et contacts », « Gestion des groupes » et « Gestion des appareils » uniquement), puis redémarrer le service.
           </p>
         ) : data.error ? (
           <p className="text-crit">{data.error}</p>

@@ -6,6 +6,7 @@ import { syncTeamViewer, tvStatus } from '../teamviewer.js';
 import { config } from '../config.js';
 import type { Db } from '../db.js';
 import { normalizeSnapshot } from '../normalize.js';
+import { osSupport } from '../oslife.js';
 import type { Inventory, Snapshot } from '../types.js';
 
 interface ServerRow {
@@ -109,6 +110,16 @@ function summary(r: ServerRow) {
         : null,
     },
     windowsUpdatesPending: r.inventory?.windowsUpdates?.pending ?? null,
+    os: r.inventory?.os
+      ? {
+          caption: (r.inventory.os.caption ?? '').replace(/^Microsoft\s+/i, '') || null,
+          version: r.inventory.os.version ?? null,
+          build: r.inventory.os.build ?? null,
+          installDate: r.inventory.os.installDate ?? null,
+          lastUpdateAt: r.inventory.windowsUpdates?.lastInstalledAt ?? null,
+          ...osSupport(r.inventory.os.caption, r.inventory.os.build),
+        }
+      : null,
     alerts: { critical: r.crit, warning: r.warn },
     health: health(r),
     veeamAgeHours: r.snapshot?.veeam?.okAgeHours ?? null,
@@ -285,6 +296,21 @@ export function apiRoutes(app: FastifyInstance, db: Db) {
     priv.post('/api/teamviewer/sync', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req) =>
       syncTeamViewer(db, (msg) => req.log.warn(msg)),
     );
+
+    // Écarter (ou remettre) un appareil TeamViewer de la liste « Agents à déployer ».
+    priv.post<{ Body: { tvId?: string; alias?: string; ignored?: boolean } }>('/api/teamviewer/ignore', async (req, reply) => {
+      const tvId = String(req.body?.tvId ?? '').replace(/\D/g, '').slice(0, 15);
+      if (!tvId) return reply.code(400).send({ error: 'tvId manquant' });
+      if (req.body?.ignored === false) await db.query('DELETE FROM tv_ignored WHERE tv_id = $1', [tvId]);
+      else
+        await db.query('INSERT INTO tv_ignored (tv_id, alias) VALUES ($1, $2) ON CONFLICT (tv_id) DO NOTHING', [
+          tvId,
+          String(req.body?.alias ?? '').slice(0, 200) || null,
+        ]);
+      const c = tvStatus.toDeploy.find((x) => x.tvId === tvId);
+      if (c) c.ignored = req.body?.ignored !== false;
+      return { ok: true };
+    });
 
     // ---- Jetons de déploiement (installation de l'agent par TeamViewer, GPO...) ----
     priv.get('/api/deploy-tokens', async () =>

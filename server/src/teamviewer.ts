@@ -19,6 +19,20 @@ export interface TeamViewerStatus {
   updated: number;
   /** Serveurs dont l'ID TeamViewer n'est dans aucune liste lue (nom de machine et ID). */
   unmatched: string[];
+  /** Groupes TeamViewer suivis (TEAMVIEWER_GROUPS) et ceux effectivement trouvés dans le compte. */
+  groups: { wanted: string[]; found: string[] };
+  /** Appareils des groupes suivis sans agent de supervision (aucun serveur avec cet ID TeamViewer). */
+  toDeploy: TvCandidate[];
+}
+
+export interface TvCandidate {
+  tvId: string;
+  alias: string;
+  client: string | null;
+  group: string;
+  online: boolean | null;
+  lastSeen: string | null;
+  ignored: boolean;
 }
 
 export const tvStatus: TeamViewerStatus = {
@@ -30,6 +44,8 @@ export const tvStatus: TeamViewerStatus = {
   matched: 0,
   updated: 0,
   unmatched: [],
+  groups: { wanted: [], found: [] },
+  toDeploy: [],
 };
 
 // Segment de numérotation en tête des noms TeamViewer : « 15 », « 3.5 », « k15 ».
@@ -109,24 +125,36 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
         remotecontrol_id?: string;
         teamviewer_id?: number;
         alias?: string;
+        groupid?: string;
+        online_state?: string;
+        last_seen?: string;
       }[];
     }>('/devices');
     for (const d of body.devices ?? []) {
       add(d.remotecontrol_id, d.alias);
       add(d.teamviewer_id, d.alias);
     }
+    const warnings: string[] = [];
+    // Noms des groupes, pour repérer les appareils des groupes EzGED.
+    const groupNames = new Map<string, string>();
+    try {
+      const g = await tvGet<{ groups?: { id?: string; name?: string }[] }>('/groups');
+      for (const x of g.groups ?? []) if (x.id && x.name) groupNames.set(x.id, x.name);
+    } catch (e) {
+      warnings.push(`groupes non lus (${(e as Error).message}) : ajouter au jeton le droit de lecture « Gestion des groupes »`);
+    }
     // Appareils gérés (personnels puis de l'entreprise) : facultatifs, ils demandent le droit de
     // lecture « Gestion des appareils » sur le jeton.
-    const warnings: string[] = [];
+    const managedErrors: string[] = [];
     for (const path of ['/managed/devices', '/managed/devices/company']) {
       try {
         for (const d of await managedDevices(path)) add(d.teamviewerId, d.name);
       } catch (e) {
-        warnings.push((e as Error).message);
+        managedErrors.push((e as Error).message);
       }
     }
-    const managedWarning = warnings.length
-      ? `appareils gérés non lus (${warnings.join(' ; ')}) : ajouter au jeton le droit de lecture « Gestion des appareils »`
+    const managedWarning = managedErrors.length
+      ? `appareils gérés non lus (${managedErrors.join(' ; ')}) : ajouter au jeton le droit de lecture « Gestion des appareils »`
       : null;
 
     const rows = await db.query<{
@@ -176,7 +204,41 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
       'SELECT id, name FROM clients c WHERE NOT EXISTS (SELECT 1 FROM servers s WHERE s.client_id = c.id)',
     );
     for (const o of orphans) if (isVersionOnly(o.name)) await db.query('DELETE FROM clients WHERE id = $1', [o.id]);
+
+    // Agents à déployer : appareils des groupes suivis dont l'ID n'est remonté par aucun agent.
+    const equipped = new Set(rows.map((r) => digits(r.tv)));
+    const ignored = new Set((await db.query<{ tv_id: string }>('SELECT tv_id FROM tv_ignored')).map((r) => r.tv_id));
+    const wanted = config.teamviewerGroups;
+    const found = [...groupNames.values()].filter((n) => wanted.includes(n.toLowerCase()));
+    const toDeploy: TvCandidate[] = [];
+    const seen = new Set<string>();
+    for (const d of body.devices ?? []) {
+      const group = groupNames.get(d.groupid ?? '');
+      if (!group || !wanted.includes(group.toLowerCase())) continue;
+      const ids = [digits(d.remotecontrol_id), digits(d.teamviewer_id)].filter(Boolean);
+      const tvId = ids[0];
+      if (!tvId || seen.has(tvId) || ids.some((i) => equipped.has(i))) continue;
+      seen.add(tvId);
+      const alias = String(d.alias ?? '').trim() || tvId;
+      toDeploy.push({
+        tvId,
+        alias,
+        client: clientFromAlias(alias),
+        group,
+        online: d.online_state ? d.online_state.toLowerCase() === 'online' : null,
+        lastSeen: d.last_seen ?? null,
+        ignored: ids.some((i) => ignored.has(i)),
+      });
+    }
+    toDeploy.sort((a, b) => Number(b.online) - Number(a.online) || a.alias.localeCompare(b.alias, 'fr'));
+    if (groupNames.size && !found.length) {
+      warnings.push(`aucun groupe TeamViewer nommé ${wanted.join(' ou ')} : renseigner TEAMVIEWER_GROUPS dans le .env`);
+    }
+    const groupWarning = warnings.length ? `agents à déployer : ${warnings.join(' ; ')}` : null;
+
     Object.assign(tvStatus, {
+      groups: { wanted, found },
+      toDeploy,
       lastSyncAt: new Date().toISOString(),
       error: null,
       devices: aliases.size,
@@ -184,7 +246,7 @@ export async function syncTeamViewer(db: Db, log: (msg: string) => void): Promis
       updated,
       unmatched,
       // Le droit manquant ne gêne que si des serveurs restent introuvables.
-      warning: unmatched.length ? managedWarning : null,
+      warning: [unmatched.length ? managedWarning : null, groupWarning].filter(Boolean).join(' — ') || null,
     });
   } catch (e) {
     tvStatus.lastSyncAt = new Date().toISOString();

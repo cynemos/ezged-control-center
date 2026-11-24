@@ -7,12 +7,14 @@ import Enroll from './pages/Enroll';
 import Fleet from './pages/Fleet';
 import Login from './pages/Login';
 import Server from './pages/Server';
+import ToDeploy, { ToDeployCount } from './pages/ToDeploy';
 import Versions from './pages/Versions';
 
 const NAV = [
   ['/', 'Parc'],
   ['/versions', 'Versions'],
   ['/alertes', 'Alertes'],
+  ['/a-deployer', 'Agents à déployer'],
   ['/ajouter', 'Ajouter un serveur'],
 ] as const;
 
@@ -69,6 +71,7 @@ export default function App() {
                 }
               >
                 {label}
+                {to === '/a-deployer' && <ToDeployCount />}
               </NavLink>
             ))}
           </nav>
@@ -93,6 +96,7 @@ export default function App() {
           <Route path="/serveurs/:id" element={<Server />} />
           <Route path="/versions" element={<Versions />} />
           <Route path="/alertes" element={<Alerts />} />
+          <Route path="/a-deployer" element={<ToDeploy />} />
           <Route path="/ajouter" element={<Enroll />} />
           <Route path="*" element={<p className="text-muted">Page introuvable.</p>} />
         </Routes>

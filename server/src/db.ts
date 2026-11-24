@@ -82,6 +82,12 @@ CREATE TABLE IF NOT EXISTS deploy_tokens (
 );
 -- Jeton de déploiement ayant servi à enregistrer le serveur (traçabilité).
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS deploy_token_id UUID;
+-- Appareils TeamViewer écartés de la liste « Agents à déployer » (pas un serveur EzGED...).
+CREATE TABLE IF NOT EXISTS tv_ignored (
+  tv_id       TEXT PRIMARY KEY,
+  alias       TEXT,
+  ignored_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 export async function openDb(): Promise<Db> {

@@ -50,6 +50,16 @@ export interface ServerSummary {
   pendingReboot: boolean;
   versions: { ezged: string | null; apache: string | null; php: string | null; mariadb: string | null; windows: string | null };
   windowsUpdatesPending: number | null;
+  /** Système : édition, version (24H2), build, fin de support Microsoft. */
+  os: {
+    caption: string | null;
+    version: string | null;
+    build: string | null;
+    installDate: string | null;
+    lastUpdateAt: string | null;
+    endOfSupport: string | null;
+    supportDaysLeft: number | null;
+  } | null;
   alerts: { critical: number; warning: number };
   rustdeskId: string | null;
   teamviewerId: string | null;

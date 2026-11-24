@@ -46,9 +46,14 @@ export const config = {
   agentAutoUpdate: env.AGENT_AUTO_UPDATE === '1',
   agentScript: env.AGENT_SCRIPT ?? '',
 
-  // Jeton de script TeamViewer (lecture seule « Ordinateurs et contacts » et « Gestion des appareils ») : nom et client des fiches
+  // Jeton de script TeamViewer (lecture seule « Ordinateurs et contacts », « Gestion des groupes », « Gestion des appareils ») : nom et client des fiches
   // vides déduits du nom de l'appareil dans le compte TeamViewer.
   teamviewerApiToken: env.TEAMVIEWER_API_TOKEN ?? '',
+  // Groupes TeamViewer des serveurs EzGED (séparés par des virgules) : leurs appareils sans agent forment la page « Agents à déployer ».
+  teamviewerGroups: (env.TEAMVIEWER_GROUPS ?? 'EzGED')
+    .split(',')
+    .map((g) => g.trim().toLowerCase())
+    .filter(Boolean),
 
   offlineMinutes: num('OFFLINE_MINUTES', 5),
   retentionDays: num('RETENTION_DAYS', 30),
