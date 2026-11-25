@@ -26,6 +26,8 @@ export interface TvStatus {
 }
 
 const spaced = (id: string) => id.replace(/(\d{3})(?=\d)/g, '$1 ');
+// Minuscules sans accents : « medical » trouve « MÉDICAL ».
+const fold = (v: string) => v.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // Appareils des groupes TeamViewer EzGED dont aucun agent ne remonte l'ID : serveurs à équiper.
 export default function ToDeploy() {
@@ -33,12 +35,21 @@ export default function ToDeploy() {
   const [view, setView] = useState<'todo' | 'ignored'>('todo');
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [q, setQ] = useState('');
   if (!data) return null;
 
   const all = data.toDeploy ?? [];
   const todo = all.filter((c) => !c.ignored);
   const ignored = all.filter((c) => c.ignored);
-  const rows = view === 'todo' ? todo : ignored;
+  const term = fold(q.trim());
+  const digits = term.replace(/\s/g, '');
+  // Recherche sur le nom TeamViewer, le client déduit, le groupe et l'ID (espaces ignorés).
+  const match = (c: TvCandidate) =>
+    !term ||
+    [c.alias, c.client ?? '', c.group].some((v) => fold(v).includes(term)) ||
+    (/^\d+$/.test(digits) && c.tvId.includes(digits));
+  const listed = view === 'todo' ? todo : ignored;
+  const rows = listed.filter(match);
   const online = todo.filter((c) => c.online).length;
 
   async function sync() {
@@ -106,6 +117,31 @@ export default function ToDeploy() {
                 ['ignored', `Ignorés (${ignored.length})`],
               ]}
             />
+            <div className="relative w-72 max-w-full">
+              <svg
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+                viewBox="0 0 20 20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <circle cx="9" cy="9" r="6" />
+                <path d="m14 14 4 4" strokeLinecap="round" />
+              </svg>
+              <input
+                type="search"
+                placeholder="Rechercher appareil, client, ID…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => e.key === 'Escape' && setQ('')}
+                className="w-full !pl-9"
+              />
+            </div>
+            {term && (
+              <span className="text-xs tabular-nums text-muted">
+                {rows.length} / {listed.length}
+              </span>
+            )}
             <span className="text-xs text-muted">
               Pour équiper un serveur : prendre la main, puis lancer le script de{' '}
               <Link to="/ajouter" className="text-accent">
@@ -189,7 +225,9 @@ export default function ToDeploy() {
             </table>
             {rows.length === 0 && (
               <p className="py-12 text-center text-muted">
-                {view === 'todo'
+                {term && listed.length
+                  ? `Aucun appareil ne correspond à « ${q.trim()} ».`
+                  : view === 'todo'
                   ? data.lastSyncAt && data.groups && !data.groups.found.length
                     ? 'Groupe TeamViewer non lu : liste indisponible (voir le message ci-dessus).'
                     : data.lastSyncAt
