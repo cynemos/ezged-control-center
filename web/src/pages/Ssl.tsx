@@ -42,6 +42,19 @@ interface SslStatus {
   agentMin: string;
   fleetCerts: { cn: string; servers: number; nextExpiry: string }[];
   targets: Target[];
+  sitesAgentMin: string;
+  domain: string;
+  sites: {
+    id: string;
+    name: string;
+    client: string | null;
+    agentVersion: string | null;
+    online: boolean;
+    known: boolean;
+    links: { url: string; host: string; port: number; inDomain: boolean }[];
+    certNotAfter: string | null;
+    certDaysLeft: number | null;
+  }[];
 }
 
 const day = (iso: string) => new Date(iso).toLocaleDateString("fr-FR");
@@ -409,6 +422,135 @@ export default function Ssl() {
           </table>
         </div>
       )}
+
+      <Sites data={data} />
     </div>
+  );
+}
+
+// Serveurs équipés et adresse publique de chacun (ServerName des sites SSL d'Apache, redirections).
+function Sites({ data }: { data: SslStatus }) {
+  const [q, setQ] = useState("");
+  const term = q.trim().toLowerCase();
+  const rows = data.sites.filter(
+    (s) =>
+      !term ||
+      [s.name, s.client ?? "", ...s.links.map((l) => l.host)].some((v) =>
+        v.toLowerCase().includes(term),
+      ),
+  );
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-base font-semibold">
+          Serveurs équipés ({data.sites.length})
+        </h2>
+        <input
+          placeholder="Rechercher serveur, client, adresse…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          className="w-72 max-w-full"
+        />
+        <span className="text-xs text-muted">
+          Adresses lues dans la configuration Apache (ServerName des sites SSL,
+          redirections)
+          {data.domain && (
+            <>
+              {" "}
+              ; en premier, celles en <b>.{data.domain}</b>
+            </>
+          )}
+          .
+        </span>
+      </div>
+      <div className="glass overflow-x-auto rounded-xl">
+        <table>
+          <thead>
+            <tr>
+              <th>Serveur</th>
+              <th>Client</th>
+              <th>Adresse</th>
+              <th>Port</th>
+              <th>Certificat</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((s) => {
+              const [main, ...others] = s.links;
+              return (
+                <tr key={s.id}>
+                  <td>
+                    <Link
+                      to={`/serveurs/${s.id}`}
+                      className="font-medium hover:text-accent"
+                    >
+                      {s.name}
+                    </Link>
+                    {!s.online && (
+                      <div className="text-[11px] text-muted">hors ligne</div>
+                    )}
+                  </td>
+                  <td className="text-muted">{s.client ?? "—"}</td>
+                  <td className="whitespace-normal">
+                    {main ? (
+                      <>
+                        <a
+                          href={main.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-accent hover:underline"
+                        >
+                          {main.host}
+                        </a>
+                        {others.map((l) => (
+                          <div key={l.url} className="text-[11px]">
+                            <a
+                              href={l.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-muted hover:text-accent"
+                            >
+                              {l.host}
+                              {l.port !== main.port && `:${l.port}`}
+                            </a>
+                          </div>
+                        ))}
+                      </>
+                    ) : (
+                      <span className="text-xs text-muted">
+                        {s.known
+                          ? "Aucun ServerName HTTPS"
+                          : `Agent ${data.sitesAgentMin} requis (actuel ${s.agentVersion ?? "?"})`}
+                      </span>
+                    )}
+                  </td>
+                  <td className="font-mono text-xs">
+                    {main ? main.port : "—"}
+                  </td>
+                  <td className="text-xs">
+                    {s.certNotAfter ? (
+                      <span
+                        className={
+                          s.certDaysLeft !== null && s.certDaysLeft <= 15
+                            ? "text-warn"
+                            : "text-muted"
+                        }
+                      >
+                        {day(s.certNotAfter)} ({s.certDaysLeft} j)
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {rows.length === 0 && (
+          <p className="py-8 text-center text-muted">Aucun serveur.</p>
+        )}
+      </div>
+    </section>
   );
 }

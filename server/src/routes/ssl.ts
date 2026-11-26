@@ -9,6 +9,7 @@ import {
   encryptKey,
   matchingCerts,
   parseBundle,
+  siteLinks,
   SSL_AGENT_MIN,
   versionAtLeast,
   type BundleRow,
@@ -35,6 +36,8 @@ interface JobRow {
 }
 
 const ONLINE_MS = 5 * 60_000;
+/** Version de l'agent qui remonte les sites Apache (ServerName, redirections). */
+const SITES_AGENT_MIN = '0.4.1';
 
 function bundleView(b: BundleRow) {
   return {
@@ -77,7 +80,24 @@ export function sslRoutes(priv: FastifyInstance, db: Db) {
       }
     }
     const fleetCerts = [...names.values()].sort((a, b) => b.servers - a.servers);
-    if (!bundle) return { bundle: null, agentMin: SSL_AGENT_MIN, fleetCerts, targets: [] };
+    // Serveurs équipés et leurs adresses publiques (ServerName des sites SSL, redirections).
+    const domain = (bundle?.cn ?? fleetCerts[0]?.cn ?? '').replace(/^\*\./, '');
+    const sites = rows.map((r) => {
+      const certs = r.inventory?.certificates ?? [];
+      const next = certs.reduce<(typeof certs)[number] | null>((a, c) => (!a || c.notAfter < a.notAfter ? c : a), null);
+      return {
+        id: r.id,
+        name: r.name,
+        client: r.client,
+        agentVersion: r.agent_version,
+        online: Boolean(r.last_seen && Date.now() - new Date(r.last_seen).getTime() < ONLINE_MS),
+        known: Array.isArray(r.inventory?.apacheSites),
+        links: siteLinks(r.inventory, domain),
+        certNotAfter: next?.notAfter ?? null,
+        certDaysLeft: next?.daysLeft ?? null,
+      };
+    });
+    if (!bundle) return { bundle: null, agentMin: SSL_AGENT_MIN, sitesAgentMin: SITES_AGENT_MIN, domain, fleetCerts, sites, targets: [] };
 
     const jobs = new Map(
       (
@@ -104,7 +124,7 @@ export function sslRoutes(priv: FastifyInstance, db: Db) {
           ? { status: job.status, attempts: job.attempts, message: job.message, requestedAt: job.requested_at, updatedAt: job.updated_at }
           : null,
       }));
-    return { bundle: bundleView(bundle), agentMin: SSL_AGENT_MIN, fleetCerts, targets };
+    return { bundle: bundleView(bundle), agentMin: SSL_AGENT_MIN, sitesAgentMin: SITES_AGENT_MIN, domain, fleetCerts, sites, targets };
   });
 
   // Dépôt des fichiers reçus (texte PEM lu par le navigateur) : remplace le certificat déposé précédemment.

@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.4.0'
+$AgentVersion = '0.4.1'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -90,6 +90,7 @@ if (Test-Path $StateFile) {
   $s = Invoke-Safe 'state' { Get-Content $StateFile -Raw | ConvertFrom-Json }
   if ($s) {
     $state.lastInventory = $s.lastInventory
+    $state.inventoryAgent = $s.inventoryAgent
     if ($s.inventoryIntervalMin) { $state.inventoryIntervalMin = $s.inventoryIntervalMin }
     if ($s.docs) { $state.docs = $s.docs }
     if ($s.cache) { foreach ($p in $s.cache.PSObject.Properties) { $state.cache[$p.Name] = $p.Value } }
@@ -626,6 +627,37 @@ function Get-ApacheCertificates {
   return $certs
 }
 
+# Sites Apache : un par <VirtualHost> (et un pour la configuration hors bloc s'il y a un ServerName),
+# avec port, SSL, ServerName, ServerAlias et adresses de redirection (Redirect, RedirectMatch,
+# RewriteRule vers une URL http(s)). Sert a afficher l'adresse publique de chaque serveur.
+function Get-ApacheSites {
+  $sites = @()
+  $mainName = $null
+  foreach ($f in @(Get-ApacheConfFiles)) {
+    $cur = $null
+    foreach ($line in Get-Content $f) {
+      if ($line -match '^\s*<VirtualHost\s+([^>]+)>') {
+        $port = [regex]::Match($Matches[1], ':(\d+)')
+        $cur = [ordered]@{ port = if ($port.Success) { [int]$port.Groups[1].Value } else { $null }; ssl = $false; serverName = $null; aliases = @(); redirects = @() }
+      } elseif ($line -match '^\s*</VirtualHost>') {
+        if ($cur) { $sites += $cur }
+        $cur = $null
+      } elseif ($line -match '^\s*ServerName\s+(\S+)') {
+        $name = $Matches[1].Trim('"')
+        if ($cur) { $cur.serverName = $name } elseif (-not $mainName) { $mainName = $name }
+      } elseif ($cur -and $line -match '^\s*ServerAlias\s+(.+)$') {
+        $cur.aliases += @($Matches[1].Trim() -split '\s+' | Where-Object { $_ })
+      } elseif ($cur -and $line -match '^\s*SSLEngine\s+on') {
+        $cur.ssl = $true
+      } elseif ($cur -and $line -match '^\s*(Redirect\w*|RewriteRule)\s.*?(https?://[^\s"]+)') {
+        if ($cur.redirects -notcontains $Matches[2]) { $cur.redirects += $Matches[2] }
+      }
+    }
+  }
+  if ($mainName) { $sites += [ordered]@{ port = $null; ssl = $false; serverName = $mainName; aliases = @(); redirects = @(); main = $true } }
+  return $sites
+}
+
 function Get-WindowsUpdateState {
   $pending = Invoke-Safe 'windows-update' {
     $searcher = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher()
@@ -684,6 +716,7 @@ function Get-Inventory {
     }
     windowsUpdates = Get-WindowsUpdateState
     certificates   = @(Invoke-Safe 'certificates' { Get-ApacheCertificates } @())
+    apacheSites    = @(Invoke-Safe 'apache-sites' { Get-ApacheSites } @())
     hardware       = [ordered]@{
       model   = $cs.Model
       cpuName = ($cpus | Select-Object -First 1).Name
@@ -731,7 +764,8 @@ if ($report.backup) { $report.backup.ageHours = Get-AgeHours $report.backup.last
 if ($report.veeam) { $report.veeam.okAgeHours = Get-AgeHours $report.veeam.lastOkAt }
 if ($null -eq $report.pendingReboot) { $report.pendingReboot = $false }
 
-$inventoryDue = $ForceInventory -or -not $state.lastInventory -or
+# Nouvelle version de l'agent : inventaire tout de suite, pour les informations qu'elle ajoute.
+$inventoryDue = $ForceInventory -or -not $state.lastInventory -or ($state.inventoryAgent -ne $AgentVersion) -or
   (((Get-Date) - [datetime]$state.lastInventory).TotalMinutes -ge $state.inventoryIntervalMin)
 if ($inventoryDue) {
   $report.inventory = Invoke-Safe 'inventory' { Get-Inventory }
@@ -953,7 +987,7 @@ try {
   $resp = Invoke-RestMethod -Method Post -Uri ($cfg.serverUrl.TrimEnd('/') + '/api/agent/report') `
     -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json; charset=utf-8' `
     -Body ([Text.Encoding]::UTF8.GetBytes($json)) -TimeoutSec 30 @Basic
-  if ($inventoryDue -and $report.inventory) { $state.lastInventory = (Get-Date).ToString('o') }
+  if ($inventoryDue -and $report.inventory) { $state.lastInventory = (Get-Date).ToString('o'); $state.inventoryAgent = $AgentVersion }
   if ($resp.inventoryIntervalMin) { $state.inventoryIntervalMin = [int]$resp.inventoryIntervalMin }
   $state | ConvertTo-Json -Depth 10 | Set-Content -Path $StateFile -Encoding UTF8
 } catch {

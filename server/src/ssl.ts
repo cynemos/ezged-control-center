@@ -177,6 +177,48 @@ export function matchingCerts(inv: Inventory | null | undefined, cn: string): In
   return (inv?.certificates ?? []).filter((c) => commonName(c.subject) === cn);
 }
 
+export interface SiteLink {
+  url: string;
+  host: string;
+  port: number;
+  /** Nom couvert par le certificat commun (ex. xx.digitged.fr pour *.digitged.fr). */
+  inDomain: boolean;
+}
+
+const LOCAL_HOST = /^(localhost|127\.|\[?::1\]?$|\d+\.\d+\.\d+\.\d+$)/i;
+
+/**
+ * Adresses publiques HTTPS d'un serveur, tirées de sa configuration Apache : ServerName / ServerAlias
+ * des sites SSL et cibles des redirections. Les noms du domaine du certificat commun passent en tête.
+ */
+export function siteLinks(inv: Inventory | null | undefined, domain: string): SiteLink[] {
+  const out = new Map<string, SiteLink>();
+  const add = (host: string, port: number) => {
+    host = host.trim().toLowerCase().replace(/\.$/, '');
+    if (!/^[a-z0-9.-]+$/.test(host) || LOCAL_HOST.test(host)) return; // variables ($1...), jokers, adresses locales
+    const url = `https://${host}${port === 443 ? '' : `:${port}`}/`;
+    if (!out.has(url)) out.set(url, { url, host, port, inDomain: Boolean(domain) && (host === domain || host.endsWith(`.${domain}`)) });
+  };
+  for (const s of inv?.apacheSites ?? []) {
+    if (s.ssl) {
+      for (const name of [s.serverName, ...(s.aliases ?? [])]) {
+        if (!name) continue;
+        const m = /^(?:https?:\/\/)?([^:/\s]+)(?::(\d+))?/i.exec(name.replace(/^"|"$/g, ''));
+        if (m) add(m[1], m[2] ? Number(m[2]) : (s.port ?? 443));
+      }
+    }
+    for (const r of s.redirects ?? []) {
+      try {
+        const u = new URL(r);
+        if (u.protocol === 'https:') add(u.hostname, u.port ? Number(u.port) : 443);
+      } catch {
+        /* cible de redirection avec variables ($1...) : ignorée */
+      }
+    }
+  }
+  return [...out.values()].sort((a, b) => Number(b.inDomain) - Number(a.inDomain));
+}
+
 /** Le serveur présente-t-il déjà ce certificat ? Empreinte si l'agent la remonte, sinon date d'expiration. */
 export function certUpToDate(certs: InvCert[], bundle: Pick<BundleRow, 'thumbprint' | 'not_after'>): boolean {
   if (!certs.length) return false;

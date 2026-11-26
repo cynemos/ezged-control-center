@@ -245,6 +245,10 @@ export default function Help() {
             <p className="text-muted">
               Agent 0.4.0 minimum. La clé privée est stockée chiffrée et n’est remise qu’au serveur dont le remplacement est demandé.
             </p>
+            <p>
+              Le tableau « Serveurs équipés » donne l’adresse publique de chaque serveur (<code>xx.digitged.fr</code> et son port, souvent
+              4430), lue dans les <code>ServerName</code> et redirections de la configuration Apache (agent 0.4.1).
+            </p>
           </Section>
 
           <Section id="mises-a-jour" title="Mises à jour">

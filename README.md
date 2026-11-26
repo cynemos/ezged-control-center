@@ -187,6 +187,8 @@ Le certificat commun aux serveurs EzGED (renouvelé chaque année) se remplace d
 
 Les fichiers ne sont remis qu'à l'agent d'un serveur dont le remplacement est demandé, trois fois au plus.
 
+La même page liste les serveurs équipés avec leur adresse publique (par exemple `https://xx.digitged.fr:4430/`), lue dans la configuration Apache : `ServerName` et `ServerAlias` des sites SSL, cibles des redirections (`Redirect`, `RewriteRule`). Les noms du domaine du certificat commun passent en tête. Agent 0.4.1 minimum.
+
 Si les documents ne sont pas dans le `stockagesdir` de `instance.conf` (stockage déclaré dans l'administration EzGED), passer `-DocsDir E:\ged` à l'installeur : relancé sur un serveur déjà enregistré, il garde son jeton.
 
 L'installeur crée `C:\ProgramData\EzGedControlCenter` (accès SYSTEM et administrateurs uniquement), chiffre le jeton avec DPAPI et crée la tâche planifiée `EzGed ControlCenter Agent`.

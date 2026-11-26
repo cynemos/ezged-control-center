@@ -127,6 +127,8 @@ export interface Inventory {
   };
   windowsUpdates?: { pending?: number | null; lastInstalledAt?: string | null; error?: string };
   certificates?: { file: string; subject: string; notAfter: string; daysLeft: number; thumbprint?: string }[];
+  // Sites Apache (agent 0.4.1) : un par <VirtualHost>, main = ServerName hors bloc.
+  apacheSites?: { port: number | null; ssl: boolean; serverName: string | null; aliases: string[]; redirects: string[]; main?: boolean }[];
   hardware?: { model?: string; cpuName?: string; cores?: number };
 }
 
