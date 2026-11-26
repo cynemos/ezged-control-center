@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import { gedOutages } from '../alerts.js';
 import { createSession, newToken, requireUser, safeEqual, SESSION_COOKIE, sha256, verifyTotp } from '../auth.js';
 import { launcherScript } from '../deploy.js';
 import { syncTeamViewer, tvStatus } from '../teamviewer.js';
 import { config } from '../config.js';
 import type { Db } from '../db.js';
 import { normalizeSnapshot } from '../normalize.js';
+import { notifyChannels } from '../notify.js';
 import { osSupport } from '../oslife.js';
 import { consoleVersion, startedAt } from '../version.js';
 import { agentScript } from './agent.js';
@@ -191,6 +193,7 @@ export function apiRoutes(app: FastifyInstance, db: Db) {
         publicUrl: config.publicUrl,
         teamviewer: Boolean(config.teamviewerApiToken),
         agentAutoUpdate: config.agentAutoUpdate,
+        notifications: notifyChannels(),
         servers: counts?.servers ?? 0,
         clients: counts?.clients ?? 0,
       };
@@ -298,6 +301,9 @@ export function apiRoutes(app: FastifyInstance, db: Db) {
       await db.query('DELETE FROM servers WHERE id = $1', [req.params.id]);
       return { ok: true };
     });
+
+    // Bandeau « GED hors service » : serveurs dont Apache, EzGED ou MySQL est arrêté.
+    priv.get('/api/outages', async () => ({ outages: await gedOutages(db), notifications: notifyChannels() }));
 
     priv.get('/api/clients', async () => db.query('SELECT id, name FROM clients ORDER BY name'));
 

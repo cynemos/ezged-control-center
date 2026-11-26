@@ -73,6 +73,8 @@ L'agent **ne lit jamais** les mots de passe de `instance.conf` ni les clés de `
 
 Seuils dans `server/src/alerts.ts`. Notifications par webhook, Telegram et e-mail (`.env`), à l'ouverture, à l'aggravation et à la résolution.
 
+**GED hors service.** Apache, EzGED ou MySQL arrêté rend la GED inutilisable. La console affiche alors un bandeau rouge en haut de toutes les pages (serveur, service, durée), préfixe l'onglet du navigateur par « ⛔ GED HS (n) » et peut envoyer une notification de bureau (à activer depuis le bandeau). Les notifications portent l'objet « GED HORS SERVICE », puis « RAPPEL » toutes les heures tant que l'alerte n'est ni résolue ni acquittée (« Je m'en occupe » dans le bandeau). Sans e-mail ni webhook configuré, le bandeau le signale.
+
 ## Développement (Windows, sans Docker)
 
 ```powershell

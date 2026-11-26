@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Route, Routes, useLocation } from 'react-router';
 import { api } from './api';
+import { GedOutageBanner } from './components/GedOutage';
 import { Logo } from './components/ui';
 import About from './pages/About';
 import Alerts from './pages/Alerts';
@@ -122,6 +123,7 @@ export default function App() {
             </button>
           </div>
         </div>
+        <GedOutageBanner />
         <div className="h-px animate-sweep bg-[linear-gradient(90deg,transparent,rgb(76_154_255/0.7),rgb(139_92_246/0.7),transparent)] bg-[length:50%_100%] bg-no-repeat" />
       </header>
       <main className="mx-auto w-full max-w-[1500px] flex-1 px-4 py-6">

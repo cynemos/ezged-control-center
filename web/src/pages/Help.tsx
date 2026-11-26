@@ -175,6 +175,13 @@ export default function Help() {
               Les services Apache2.4, EzGED et MySQL arrêtés déclenchent une alerte critique. Une alerte s’ouvre au premier dépassement et
               se ferme d’elle-même quand la mesure revient à la normale.
             </p>
+            <p className="text-muted">
+              <strong className="text-crit">GED hors service</strong> : dès qu’un de ces trois services est arrêté, un bandeau rouge
+              s’affiche en haut de toutes les pages (serveur, service, depuis quand) et l’onglet du navigateur passe à « ⛔ GED HS ». Le
+              bouton « Activer l’alerte sur le bureau » ajoute une notification Windows, même onglet en arrière-plan. Les notifications
+              e-mail ou webhook portent l’objet « GED HORS SERVICE », avec un rappel toutes les heures tant que le service reste arrêté.
+              « Je m’en occupe » acquitte l’alerte et coupe les rappels ; le bandeau reste jusqu’au redémarrage du service.
+            </p>
           </Section>
 
           <Section id="deploiement" title="Déployer l’agent">

@@ -13,6 +13,15 @@ function mailer() {
   return transporter;
 }
 
+/** Canaux de notification configurés (affichés dans la console, sans leurs paramètres). */
+export function notifyChannels(): string[] {
+  const out: string[] = [];
+  if (config.smtpHost && config.alertEmailTo) out.push('e-mail');
+  if (config.webhookUrl) out.push('webhook');
+  if (config.telegramToken && config.telegramChatId) out.push('Telegram');
+  return out;
+}
+
 /** Envoie une notification sur tous les canaux configurés. N'échoue jamais : les erreurs sont journalisées. */
 export async function notify(subject: string, body: string, log: (msg: string) => void): Promise<void> {
   const text = `${subject}\n${body}`;

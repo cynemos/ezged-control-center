@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS alerts (
   acked      BOOLEAN NOT NULL DEFAULT false
 );
 CREATE UNIQUE INDEX IF NOT EXISTS alerts_one_open ON alerts (server_id, rule) WHERE closed_at IS NULL;
+-- Dernier rappel envoyé pour une alerte « GED hors service » restée ouverte.
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS version_history (
   id          SERIAL PRIMARY KEY,

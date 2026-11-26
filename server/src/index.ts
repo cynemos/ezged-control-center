@@ -5,7 +5,7 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
-import { checkOffline } from './alerts.js';
+import { checkOffline, remindGedOutages } from './alerts.js';
 import { assertConfig, config } from './config.js';
 import { openDb } from './db.js';
 import { agentRoutes } from './routes/agent.js';
@@ -64,6 +64,8 @@ const log = (msg: string) => app.log.warn(msg);
 
 // Détection des serveurs muets, toutes les minutes.
 setInterval(() => void checkOffline(db, log).catch((e) => app.log.error(e)), 60_000);
+// Rappel des services GED (Apache, EzGED, MySQL) toujours arrêtés, toutes les 5 minutes.
+setInterval(() => void remindGedOutages(db, log).catch((e) => app.log.error(e)), 5 * 60_000);
 
 // Noms TeamViewer des serveurs : au démarrage puis tous les quarts d'heure (sans jeton : rien).
 const tvSync = () => void syncTeamViewer(db, log).catch((e) => app.log.error(e));

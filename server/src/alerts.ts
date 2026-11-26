@@ -36,6 +36,15 @@ export const THRESHOLDS = {
 /** Services surveillés : une alerte critique s'ils ne tournent pas. */
 export const CRITICAL_SERVICES = ['Apache2.4', 'EzGED', 'MySQL'];
 
+/** Règle d'un des trois services sans lesquels la GED n'est plus utilisable (Apache, EzGED, MySQL). */
+export function isGedRule(rule: string): boolean {
+  return rule.startsWith('service:') && CRITICAL_SERVICES.includes(rule.slice('service:'.length));
+}
+
+/** Rappel tant qu'un service GED reste arrêté et que l'alerte n'est pas acquittée. */
+export const GED_REMIND_MINUTES = 60;
+const GED_IMPACT = "La GED n'est plus utilisable par les utilisateurs.";
+
 function mb(bytes: number): string {
   return `${(bytes / 1_048_576).toFixed(1)} Mo`;
 }
@@ -244,7 +253,8 @@ export async function syncAlerts(db: Db, serverId: string, findings: Finding[], 
         f.severity,
         f.message,
       ]);
-      void notify(`[EzGed ControlCenter] ${f.severity === 'critical' ? 'CRITIQUE' : 'Alerte'} – ${label}`, f.message, log);
+      if (isGedRule(f.rule)) void notify(`[EzGed ControlCenter] GED HORS SERVICE – ${label}`, `${f.message}\n${GED_IMPACT}`, log);
+      else void notify(`[EzGed ControlCenter] ${f.severity === 'critical' ? 'CRITIQUE' : 'Alerte'} – ${label}`, f.message, log);
     } else if (existing.severity !== f.severity || existing.message !== f.message) {
       await db.query('UPDATE alerts SET severity = $2, message = $3 WHERE id = $1', [existing.id, f.severity, f.message]);
       if (existing.severity === 'warning' && f.severity === 'critical')
@@ -257,7 +267,7 @@ export async function syncAlerts(db: Db, serverId: string, findings: Finding[], 
     for (const a of open) {
       if (!active.has(a.rule)) {
         await db.query('UPDATE alerts SET closed_at = now() WHERE id = $1', [a.id]);
-        void notify(`[EzGed ControlCenter] Résolu – ${label}`, a.message, log);
+        void notify(`[EzGed ControlCenter] ${isGedRule(a.rule) ? 'GED rétablie' : 'Résolu'} – ${label}`, a.message, log);
       }
     }
   }
@@ -277,6 +287,83 @@ export async function checkOffline(db: Db, log: Log) {
       r.id,
       [{ rule: 'offline', severity: 'critical', message: `Aucun rapport de l'agent depuis ${minutes} min` }],
       'offline',
+      log,
+    );
+  }
+}
+
+const GED_RULES = CRITICAL_SERVICES.map((n) => `service:${n}`);
+
+export interface Outage {
+  id: string;
+  name: string;
+  client: string | null;
+  since: string;
+  lastSeen: string | null;
+  online: boolean;
+  acked: boolean;
+  services: { alertId: number; name: string; message: string; since: string }[];
+}
+
+/** Serveurs dont au moins un des trois services GED est arrêté (alerte ouverte), le plus ancien en premier. */
+export async function gedOutages(db: Db): Promise<Outage[]> {
+  const rows = await db.query<{
+    id: number;
+    server_id: string;
+    name: string;
+    client: string | null;
+    last_seen: Date | null;
+    rule: string;
+    message: string;
+    opened_at: Date;
+    acked: boolean;
+  }>(
+    `SELECT a.id, a.server_id, COALESCE(s.display_name, s.hostname) AS name, c.name AS client, s.last_seen,
+            a.rule, a.message, a.opened_at, a.acked
+       FROM alerts a JOIN servers s ON s.id = a.server_id LEFT JOIN clients c ON c.id = s.client_id
+      WHERE a.closed_at IS NULL AND a.rule = ANY($1::text[])
+      ORDER BY a.opened_at`,
+    [GED_RULES],
+  );
+  const by = new Map<string, Outage>();
+  for (const r of rows) {
+    const since = new Date(r.opened_at).toISOString();
+    let o = by.get(r.server_id);
+    if (!o) {
+      const lastSeen = r.last_seen ? new Date(r.last_seen).toISOString() : null;
+      o = {
+        id: r.server_id,
+        name: r.name,
+        client: r.client,
+        since,
+        lastSeen,
+        online: Boolean(lastSeen && Date.now() - new Date(lastSeen).getTime() < config.offlineMinutes * 60_000),
+        acked: true,
+        services: [],
+      };
+      by.set(r.server_id, o);
+    }
+    o.services.push({ alertId: r.id, name: r.rule.slice('service:'.length), message: r.message, since });
+    o.acked &&= r.acked;
+  }
+  return [...by.values()];
+}
+
+/** Rappel horaire des services GED toujours arrêtés, tant que l'alerte n'est pas acquittée. */
+export async function remindGedOutages(db: Db, log: Log) {
+  const due = await db.query<OpenAlert & { server_id: string; opened_at: Date }>(
+    `UPDATE alerts SET reminded_at = now()
+      WHERE closed_at IS NULL AND NOT acked AND rule = ANY($1::text[])
+        AND COALESCE(reminded_at, opened_at) < now() - ($2 || ' minutes')::interval
+      RETURNING id, server_id, rule, severity, message, opened_at`,
+    [GED_RULES, String(GED_REMIND_MINUTES)],
+  );
+  for (const a of due) {
+    const label = await serverLabel(db, a.server_id);
+    const min = (Date.now() - new Date(a.opened_at).getTime()) / 60_000;
+    void notify(
+      `[EzGed ControlCenter] RAPPEL GED HORS SERVICE depuis ${duration(min)} – ${label}`,
+      `${a.message}\n${GED_IMPACT}\nAcquitter l'alerte dans la console arrête les rappels.`,
       log,
     );
   }
