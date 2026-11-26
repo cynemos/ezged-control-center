@@ -129,6 +129,8 @@ export interface Inventory {
   certificates?: { file: string; subject: string; notAfter: string; daysLeft: number; thumbprint?: string }[];
   // Sites Apache (agent 0.4.1) : un par <VirtualHost>, main = ServerName hors bloc.
   apacheSites?: { port: number | null; ssl: boolean; serverName: string | null; aliases: string[]; redirects: string[]; main?: boolean }[];
+  // Fichiers de configuration Apache lus par l'agent (0.4.2), Include compris.
+  apacheConf?: string[];
   hardware?: { model?: string; cpuName?: string; cores?: number };
 }
 

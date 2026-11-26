@@ -417,6 +417,18 @@ export default function Server() {
               ))}
             </ul>
           )}
+          {(inv.apacheConf ?? []).length > 0 && (
+            <details className="mt-3 text-xs text-muted">
+              <summary className="cursor-pointer hover:text-text">Fichiers de configuration Apache lus ({inv.apacheConf.length})</summary>
+              <ul className="mt-1 space-y-0.5 font-mono">
+                {inv.apacheConf.map((f: string) => (
+                  <li key={f} className="break-all">
+                    {f}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </Card>
       </div>
 

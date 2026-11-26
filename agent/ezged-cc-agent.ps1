@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.4.1'
+$AgentVersion = '0.4.2'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -558,22 +558,39 @@ function Read-IniKeys([string]$Path, [hashtable]$Wanted) {
   return $result
 }
 
+# Variables "Define NOM valeur" de la configuration Apache ; SRVROOT reste le dossier Apache reel.
+$script:ApacheDefines = @{}
 function Resolve-ApachePath([string]$p) {
-  $p = $p.Trim().Trim('"').Replace('${SRVROOT}', $ApacheRoot).Replace('/', '\')
+  $p = $p.Trim().Trim('"')
+  foreach ($k in $script:ApacheDefines.Keys) { $p = $p.Replace('${' + $k + '}', $script:ApacheDefines[$k]) }
+  $p = $p.Replace('${SRVROOT}', $ApacheRoot)
+  $p = $p.Replace('/', '\')
   if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $ApacheRoot $p }
 }
 
-# httpd.conf + fichiers inclus (un niveau), lignes commentees ignorees.
+# httpd.conf + fichiers inclus, a tous les niveaux (un fichier inclus peut en inclure d'autres :
+# httpd.conf > extra\httpd-ezged.conf > extra\httpd-ssl.conf). Dossiers et jokers acceptes.
 function Get-ApacheConfFiles {
   $httpd = Join-Path $ApacheRoot 'conf\httpd.conf'
   if (-not (Test-Path $httpd)) { return @() }
-  $files = @($httpd)
-  foreach ($line in Get-Content $httpd) {
-    if ($line -match '^\s*Include(?:Optional)?\s+(.+)$') {
-      $files += @(Get-ChildItem -Path (Resolve-ApachePath $Matches[1]) -File -ErrorAction SilentlyContinue | ForEach-Object FullName)
+  $files = New-Object System.Collections.ArrayList
+  $seen = @{}
+  $queue = New-Object System.Collections.Queue
+  $queue.Enqueue($httpd)
+  while ($queue.Count -and $files.Count -lt 100) {
+    $f = $queue.Dequeue()
+    if ($seen[$f.ToLower()]) { continue }
+    $seen[$f.ToLower()] = $true
+    [void]$files.Add($f)
+    foreach ($line in Get-Content $f) {
+      if ($line -match '^\s*Define\s+(\w+)\s+(.+)$') {
+        if ($Matches[1] -ne 'SRVROOT') { $script:ApacheDefines[$Matches[1]] = $Matches[2].Trim().Trim('"') }
+      } elseif ($line -match '^\s*Include(?:Optional)?\s+(.+)$') {
+        foreach ($inc in @(Get-ChildItem -Path (Resolve-ApachePath $Matches[1]) -File -ErrorAction SilentlyContinue)) { $queue.Enqueue($inc.FullName) }
+      }
     }
   }
-  return $files
+  return @($files)
 }
 
 # Ports Apache (directives Listen) et protocole : https si "Listen 443 https" ou si un
@@ -717,6 +734,8 @@ function Get-Inventory {
     windowsUpdates = Get-WindowsUpdateState
     certificates   = @(Invoke-Safe 'certificates' { Get-ApacheCertificates } @())
     apacheSites    = @(Invoke-Safe 'apache-sites' { Get-ApacheSites } @())
+    # Fichiers de configuration Apache lus (diagnostic : SSL ou sites introuvables).
+    apacheConf     = @(Invoke-Safe 'apache-conf' { Get-ApacheConfFiles } @())
     hardware       = [ordered]@{
       model   = $cs.Model
       cpuName = ($cpus | Select-Object -First 1).Name
