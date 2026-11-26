@@ -126,7 +126,7 @@ export interface Inventory {
     docs?: { dir?: string; found?: boolean; sizeGB?: number; files?: number; partial?: boolean; at?: string } | null;
   };
   windowsUpdates?: { pending?: number | null; lastInstalledAt?: string | null; error?: string };
-  certificates?: { file: string; subject: string; notAfter: string; daysLeft: number }[];
+  certificates?: { file: string; subject: string; notAfter: string; daysLeft: number; thumbprint?: string }[];
   hardware?: { model?: string; cpuName?: string; cores?: number };
 }
 

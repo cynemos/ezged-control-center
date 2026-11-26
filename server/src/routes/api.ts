@@ -9,6 +9,7 @@ import { normalizeSnapshot } from '../normalize.js';
 import { osSupport } from '../oslife.js';
 import { consoleVersion, startedAt } from '../version.js';
 import { agentScript } from './agent.js';
+import { sslRoutes } from './ssl.js';
 import type { Inventory, Snapshot } from '../types.js';
 
 interface ServerRow {
@@ -172,6 +173,7 @@ export function apiRoutes(app: FastifyInstance, db: Db) {
   // Toutes les routes ci-dessous exigent une session.
   app.register(async (priv) => {
     priv.addHook('preHandler', requireUser);
+    sslRoutes(priv, db);
 
     priv.get('/api/me', async () => ({ user: config.adminUser, version: consoleVersion.version }));
 

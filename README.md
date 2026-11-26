@@ -176,6 +176,17 @@ Avec `TEAMVIEWER_API_TOKEN` dans le `.env` (jeton de script créé dans la conso
 
 Mise à jour des agents : avec `AGENT_AUTO_UPDATE=1` dans le `.env` de la console, chaque agent plus ancien télécharge le script embarqué par la console, vérifie son empreinte SHA256 et sa syntaxe, puis se remplace ; la nouvelle version tourne à la minute suivante. Activer cette option donne à la console le pouvoir d'exécuter du code en SYSTEM sur tout le parc : la protéger en conséquence (mot de passe fort, double authentification). `-NoAutoUpdate` à l'installation refuse ces mises à jour sur un serveur.
 
+### Certificat SSL
+
+Le certificat commun aux serveurs EzGED (renouvelé chaque année) se remplace depuis la page **Certificat SSL** :
+
+1. Déposer les 3 fichiers reçus (certificat `.crt`, clé `.key`, chaîne `.ca-bundle.crt`, au format PEM). La console vérifie que la clé correspond au certificat, que la chaîne remonte jusqu'à l'autorité et que le certificat n'est pas expiré. La clé privée est stockée chiffrée (AES-GCM, clé dérivée de `SESSION_SECRET` : changer ce secret oblige à redéposer les fichiers).
+2. La page liste les serveurs dont Apache présente un certificat du même nom (CN). « Tester sur ce serveur » remplace le certificat sur un seul serveur ; « Déployer sur tous » n'est proposé qu'après un premier succès.
+3. À son rapport suivant, l'agent (0.4.0 minimum) récupère les fichiers et remplace ceux déclarés par `SSLCertificateFile`, `SSLCertificateKeyFile` et `SSLCertificateChainFile` dans la configuration Apache (sur EzGED : `C:\nchp\etc\nchp\ezged\digitged.crt`, `.key`, `.ca-bundle.crt`). Il garde une copie des anciens fichiers à côté (`*.avant-AAAAMMJJ-HHMMSS`), teste la configuration (`httpd -t`), redémarre le service Apache et vérifie le certificat servi en HTTPS local. Au moindre échec, les anciens fichiers sont remis et l'échec est affiché dans la page.
+4. Une fois le parc à jour, « Effacer la clé » retire la clé privée de la console.
+
+Les fichiers ne sont remis qu'à l'agent d'un serveur dont le remplacement est demandé, trois fois au plus.
+
 Si les documents ne sont pas dans le `stockagesdir` de `instance.conf` (stockage déclaré dans l'administration EzGED), passer `-DocsDir E:\ged` à l'installeur : relancé sur un serveur déjà enregistré, il garde son jeton.
 
 L'installeur crée `C:\ProgramData\EzGedControlCenter` (accès SYSTEM et administrateurs uniquement), chiffre le jeton avec DPAPI et crée la tâche planifiée `EzGed ControlCenter Agent`.

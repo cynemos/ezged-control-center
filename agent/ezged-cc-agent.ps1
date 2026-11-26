@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$AgentVersion = '0.3.2'
+$AgentVersion = '0.4.0'
 $BaseDir = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $BaseDir 'agent.log'
 $StateFile = Join-Path $BaseDir 'state.json'
@@ -617,6 +617,7 @@ function Get-ApacheCertificates {
             subject  = $cert.Subject
             notAfter = ConvertTo-IsoDate $cert.NotAfter
             daysLeft = [int][math]::Floor(($cert.NotAfter - (Get-Date)).TotalDays)
+            thumbprint = $cert.Thumbprint
           }
         }
       }
@@ -754,6 +755,175 @@ if ($DryRun) {
   return
 }
 
+# ---------------------------------------------------------------- remplacement du certificat SSL
+# Demande depuis la console (page Certificat SSL) : l'agent recoit le certificat, la chaine et la cle,
+# remplace les fichiers declares dans la configuration Apache, teste la configuration, redemarre
+# Apache et verifie le certificat presente en HTTPS local. Au moindre echec : anciens fichiers remis.
+
+# Trios (certificat, cle, chaine) de la configuration Apache : un par bloc (<VirtualHost> ou hors bloc).
+function Get-ApacheSslSets {
+  $sets = @()
+  $seen = @{}
+  foreach ($f in @(Get-ApacheConfFiles)) {
+    $blk = @{}
+    foreach ($line in (@(Get-Content $f) + @('</VirtualHost>'))) {
+      if ($line -match '^\s*</?VirtualHost') {
+        if ($blk.cert) {
+          $k = "$($blk.cert)|$($blk.key)|$($blk.chain)"
+          if (-not $seen[$k]) { $seen[$k] = $true; $sets += [pscustomobject]@{ cert = $blk.cert; key = $blk.key; chain = $blk.chain } }
+        }
+        $blk = @{}
+      } elseif ($line -match '^\s*SSLCertificateFile\s+(.+)$') { $blk.cert = Resolve-ApachePath $Matches[1] }
+      elseif ($line -match '^\s*SSLCertificateKeyFile\s+(.+)$') { $blk.key = Resolve-ApachePath $Matches[1] }
+      elseif ($line -match '^\s*SSLCertificateChainFile\s+(.+)$') { $blk.chain = Resolve-ApachePath $Matches[1] }
+    }
+  }
+  return $sets
+}
+
+function Get-CertCn($Cert) {
+  return $Cert.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false).ToLower()
+}
+
+# Executable lance sans PowerShell : httpd ecrit sur stderr, ce qui leverait une erreur ici.
+# Seul stderr est lu : httpd -t y ecrit tout son resultat.
+function Invoke-Exe([string]$Exe, [string]$Arguments) {
+  $psi = New-Object Diagnostics.ProcessStartInfo $Exe, $Arguments
+  $psi.UseShellExecute = $false
+  $psi.RedirectStandardOutput = $false
+  $psi.RedirectStandardError = $true
+  $psi.CreateNoWindow = $true
+  $p = [Diagnostics.Process]::Start($psi)
+  $err = $p.StandardError.ReadToEnd()
+  if (-not $p.WaitForExit(60000)) { try { $p.Kill() } catch { }; throw "$Exe : delai depasse" }
+  return [pscustomobject]@{ code = $p.ExitCode; output = $err.Trim() }
+}
+
+function Restart-Apache {
+  $name = @($Services | Where-Object { $_ -like 'Apache*' })[0]
+  if (-not $name) { $name = 'Apache2.4' }
+  Restart-Service -Name $name -Force
+  $svc = Get-Service -Name $name
+  $svc.WaitForStatus('Running', [TimeSpan]::FromSeconds(60))
+  Start-Sleep -Seconds 3
+  $svc.Refresh()
+  if ($svc.Status -ne 'Running') { throw "service $name arrete juste apres son redemarrage" }
+}
+
+# Certificat presente par Apache en boucle locale (SNI = nom du certificat).
+function Get-LocalTlsCert([int]$Port, [string]$HostName) {
+  $tcp = New-Object Net.Sockets.TcpClient
+  try {
+    $iar = $tcp.BeginConnect('127.0.0.1', $Port, $null, $null)
+    if (-not $iar.AsyncWaitHandle.WaitOne(5000)) { throw "port $Port injoignable" }
+    $tcp.EndConnect($iar)
+    $cb = [Net.Security.RemoteCertificateValidationCallback]{ $true }
+    $ssl = New-Object Net.Security.SslStream($tcp.GetStream(), $false, $cb)
+    $ssl.ReadTimeout = 10000
+    $protocols = [Security.Authentication.SslProtocols]::Tls12 -bor [Security.Authentication.SslProtocols]::Tls11 -bor [Security.Authentication.SslProtocols]::Tls
+    $ssl.AuthenticateAsClient($HostName, $null, $protocols, $false)
+    $remote = $ssl.RemoteCertificate
+    if (-not $remote) { throw "port $Port : aucun certificat recu" }
+    # Copie des octets, lus avant la fermeture : le certificat de la connexion est alors libere.
+    return New-Object Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList (, $remote.GetRawCertData())
+  } finally { $tcp.Close() }
+}
+
+# Chaque port HTTPS qui presente un certificat de ce nom doit presenter le nouveau.
+function Test-ApacheCert([string]$Thumb, [string]$Cn) {
+  $ports = @(Get-ApacheListen | Where-Object { $_.https } | ForEach-Object { $_.port })
+  if (-not $ports.Count) { $ports = @(443) }
+  $sni = if ($Cn.StartsWith('*.')) { 'ezged.' + $Cn.Substring(2) } else { $Cn }
+  $matched = 0
+  foreach ($port in $ports) {
+    $seen = $null; $last = $null
+    for ($i = 0; $i -lt 5 -and -not $seen; $i++) {
+      try { $seen = Get-LocalTlsCert $port $sni } catch { $last = $_.Exception.Message; Start-Sleep -Seconds 2 }
+    }
+    if (-not $seen) { return "HTTPS local injoignable sur le port $port ($last)" }
+    if ((Get-CertCn $seen) -ne $Cn) { continue }
+    if ($seen.Thumbprint -ne $Thumb) { return "le port $port presente encore l'ancien certificat" }
+    $matched++
+  }
+  if (-not $matched) { return "aucun port HTTPS ($($ports -join ', ')) ne presente le certificat $Cn" }
+  return $null
+}
+
+function Install-SslBundle($P, [string]$Expected) {
+  $X509 = 'Security.Cryptography.X509Certificates.X509Certificate2'
+  $newCert = New-Object $X509 -ArgumentList (, [Text.Encoding]::ASCII.GetBytes([string]$P.cert))
+  if ($newCert.Thumbprint -ne $Expected.ToUpper() -or $newCert.Thumbprint -ne ([string]$P.thumbprint).ToUpper()) {
+    throw 'certificat recu different de celui annonce par la console'
+  }
+  if (-not ([string]$P.key).Contains('PRIVATE KEY') -or -not ([string]$P.chain).Contains('CERTIFICATE')) { throw 'fichiers recus incomplets' }
+  $cn = ([string]$P.cn).ToLower()
+
+  $sets = @(Get-ApacheSslSets | Where-Object { (Test-Path $_.cert) -and ((Get-CertCn (New-Object $X509 -ArgumentList $_.cert)) -eq $cn) })
+  if (-not $sets.Count) { throw "aucun certificat $cn dans la configuration Apache" }
+  foreach ($s in $sets) { if (-not $s.key) { throw "pas de SSLCertificateKeyFile associe a $($s.cert)" } }
+
+  # Contenu de chaque fichier ; sans SSLCertificateChainFile, la chaine suit le certificat dans le meme fichier.
+  $writes = [ordered]@{}
+  foreach ($s in $sets) {
+    if ($s.chain) { $writes[$s.cert] = [string]$P.cert; $writes[$s.chain] = [string]$P.chain }
+    else { $writes[$s.cert] = [string]$P.cert + [string]$P.chain }
+    $writes[$s.key] = [string]$P.key
+  }
+
+  # Sauvegarde a cote des originaux (memes droits d'acces que la cle actuelle).
+  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $backups = [ordered]@{}
+  foreach ($path in $writes.Keys) {
+    if (Test-Path $path) { Copy-Item $path "$path.avant-$stamp" -Force; $backups[$path] = "$path.avant-$stamp" }
+    else { $backups[$path] = $null }
+  }
+
+  $enc = New-Object Text.UTF8Encoding($false)
+  $restarted = $false
+  try {
+    foreach ($path in $writes.Keys) {
+      [IO.File]::WriteAllText($path, ($writes[$path] -replace "`r?`n", "`r`n"), $enc)
+    }
+    $syntax = Invoke-Exe (Join-Path $ApacheRoot 'bin\httpd.exe') '-t'
+    if ($syntax.code -ne 0) { throw "configuration Apache refusee (httpd -t) : $($syntax.output)" }
+    $restarted = $true
+    Restart-Apache
+    $check = Test-ApacheCert $newCert.Thumbprint $cn
+    if ($check) { throw $check }
+  } catch {
+    $err = $_.Exception.Message
+    foreach ($path in $backups.Keys) {
+      if ($backups[$path]) { Copy-Item $backups[$path] $path -Force } else { Remove-Item $path -Force -ErrorAction SilentlyContinue }
+    }
+    # Apache pas encore redemarre (echec avant) : il tourne toujours avec les anciens fichiers.
+    $back = if (-not $restarted) { 'anciens fichiers remis, Apache pas redemarre' }
+    else { try { Restart-Apache; 'anciens fichiers remis, Apache redemarre' } catch { "anciens fichiers remis, mais Apache ne redemarre pas : $($_.Exception.Message)" } }
+    throw "$err ; $back"
+  }
+  return "certificat $cn remplace, expire le $($newCert.NotAfter.ToString('dd/MM/yyyy')) : $(@($writes.Keys) -join ', ') (sauvegardes *.avant-$stamp)"
+}
+
+function Invoke-SslDeploy($Offer, [string]$Token) {
+  if (-not $Offer -or -not $Offer.id) { return }
+  $url = $cfg.serverUrl.TrimEnd('/') + "/api/agent/ssl/$($Offer.id)"
+  $headers = @{ Authorization = "Bearer $Token" }
+  # Fichiers non remis (deja pris en charge, reseau...) : rien a signaler, la console reproposera.
+  $payload = Invoke-RestMethod -Uri $url -Headers $headers -TimeoutSec 30 @Basic
+  Write-Log "SSL : remplacement du certificat $($Offer.cn)"
+  $ok = $false
+  try { $msg = Install-SslBundle $payload ([string]$Offer.thumbprint); $ok = $true } catch { $msg = $_.Exception.Message }
+  $payload = $null
+  Write-Log ("SSL : " + $(if ($ok) { 'OK ' } else { 'ECHEC ' }) + $msg)
+  $body = @{ ok = $ok; message = $msg } | ConvertTo-Json -Compress
+  Invoke-RestMethod -Method Post -Uri "$url/result" -Headers $headers -ContentType 'application/json; charset=utf-8' `
+    -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 30 @Basic | Out-Null
+  if ($ok) {
+    # Inventaire au prochain passage : la console voit le nouveau certificat sans attendre une heure.
+    $state.lastInventory = $null
+    $state | ConvertTo-Json -Depth 10 | Set-Content -Path $StateFile -Encoding UTF8
+  }
+}
+
 # Mise a jour de l'agent proposee par la console : uniquement vers une version superieure,
 # script verifie par son empreinte SHA256 et par une analyse syntaxique avant de remplacer celui-ci.
 function Update-Agent($Offer, [string]$Token) {
@@ -792,4 +962,5 @@ try {
 }
 
 # Apres l'envoi : un echec de mise a jour ne doit pas empecher le rapport.
+Invoke-Safe 'ssl' { Invoke-SslDeploy $resp.sslDeploy $token } | Out-Null
 Invoke-Safe 'update' { Update-Agent $resp.agentUpdate $token } | Out-Null

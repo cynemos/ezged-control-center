@@ -10,6 +10,7 @@ import Help from './pages/Help';
 import Login from './pages/Login';
 import Server from './pages/Server';
 import ToDeploy, { ToDeployCount } from './pages/ToDeploy';
+import Ssl from './pages/Ssl';
 import Versions from './pages/Versions';
 
 const NAV = [
@@ -17,6 +18,7 @@ const NAV = [
   ['/versions', 'Versions'],
   ['/alertes', 'Alertes'],
   ['/a-deployer', 'Agents à déployer'],
+  ['/certificat', 'Certificat SSL'],
   ['/ajouter', 'Ajouter un serveur'],
 ] as const;
 
@@ -129,6 +131,7 @@ export default function App() {
           <Route path="/versions" element={<Versions />} />
           <Route path="/alertes" element={<Alerts />} />
           <Route path="/a-deployer" element={<ToDeploy />} />
+          <Route path="/certificat" element={<Ssl />} />
           <Route path="/ajouter" element={<Enroll />} />
           <Route path="/aide" element={<Help />} />
           <Route path="/a-propos" element={<About />} />

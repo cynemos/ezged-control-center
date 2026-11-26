@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import type { Db } from '../db.js';
 import { bootstrapScript, consumeDeployToken, deployTokenValid } from '../deploy.js';
 import { normalizeSnapshot } from '../normalize.js';
+import { decryptKey, SSL_AGENT_MIN, SSL_MAX_ATTEMPTS, SSL_STALE_MS, versionAtLeast } from '../ssl.js';
 import { requestTeamViewerSync } from '../teamviewer.js';
 import type { AgentReport, Inventory } from '../types.js';
 
@@ -245,8 +246,85 @@ export function agentRoutes(app: FastifyInstance, db: Db) {
     const script = config.agentAutoUpdate ? await agentScript() : null;
     const agentUpdate =
       script && script.version !== snapshot.agentVersion ? { version: script.version, sha256: script.sha256 } : undefined;
-    return { ok: true, inventoryIntervalMin: INVENTORY_INTERVAL_MIN, agentUpdate };
+    const sslDeploy = versionAtLeast(snapshot.agentVersion, SSL_AGENT_MIN) ? await sslOffer(server.id) : undefined;
+    return { ok: true, inventoryIntervalMin: INVENTORY_INTERVAL_MIN, agentUpdate, sslDeploy };
   });
+
+  // Remplacement du certificat SSL demandé pour ce serveur : proposé tant qu'il est en attente, ou
+  // resté sans résultat (agent interrompu), dans la limite de SSL_MAX_ATTEMPTS remises des fichiers.
+  async function sslOffer(serverId: string) {
+    await db.query(
+      `UPDATE ssl_jobs SET status = 'failed', updated_at = now(),
+              message = 'Pas de résultat de l''agent après ${SSL_MAX_ATTEMPTS} tentatives'
+        WHERE server_id = $1 AND status = 'running' AND attempts >= $2 AND updated_at < now() - make_interval(secs => $3)`,
+      [serverId, SSL_MAX_ATTEMPTS, SSL_STALE_MS / 1000],
+    );
+    const [job] = await db.query<{ id: string; thumbprint: string; cn: string }>(
+      `SELECT b.id, b.thumbprint, b.cn FROM ssl_jobs j JOIN ssl_bundles b ON b.id = j.bundle_id
+        WHERE j.server_id = $1 AND b.key_enc IS NOT NULL AND b.not_before <= now() AND j.attempts < $2
+          AND (j.status = 'pending' OR (j.status = 'running' AND j.updated_at < now() - make_interval(secs => $3)))
+        ORDER BY j.requested_at LIMIT 1`,
+      [serverId, SSL_MAX_ATTEMPTS, SSL_STALE_MS / 1000],
+    );
+    return job ? { id: job.id, thumbprint: job.thumbprint, cn: job.cn } : undefined;
+  }
+
+  // Fichiers du certificat remis à l'agent du serveur concerné, uniquement pour un remplacement demandé.
+  app.get<{ Params: { id: string } }>(
+    '/api/agent/ssl/:id',
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const server = await authAgent(req);
+      if (!server) return reply.code(401).send({ error: 'Jeton invalide' });
+      if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return reply.code(404).send({ error: 'Introuvable' });
+      const offer = await sslOffer(server.id);
+      if (!offer || offer.id !== req.params.id) return reply.code(404).send({ error: 'Aucun remplacement demandé' });
+      const [b] = await db.query<{ cert_pem: string; chain_pem: string; key_enc: string; thumbprint: string; cn: string }>(
+        'SELECT cert_pem, chain_pem, key_enc, thumbprint, cn FROM ssl_bundles WHERE id = $1',
+        [offer.id],
+      );
+      let key: string;
+      try {
+        key = decryptKey(b.key_enc);
+      } catch {
+        await db.query(
+          `UPDATE ssl_jobs SET status = 'failed', updated_at = now(),
+                  message = 'Clé privée illisible dans la console (SESSION_SECRET changé ?) : redéposer les fichiers'
+            WHERE bundle_id = $1 AND server_id = $2`,
+          [offer.id, server.id],
+        );
+        return reply.code(410).send({ error: 'Clé privée illisible' });
+      }
+      await db.query(
+        "UPDATE ssl_jobs SET status = 'running', attempts = attempts + 1, updated_at = now(), message = NULL WHERE bundle_id = $1 AND server_id = $2",
+        [offer.id, server.id],
+      );
+      req.log.info({ serverId: server.id, bundle: offer.id }, 'Certificat SSL remis à l’agent');
+      return reply.header('cache-control', 'no-store').send({ cert: b.cert_pem, chain: b.chain_pem, key, thumbprint: b.thumbprint, cn: b.cn });
+    },
+  );
+
+  // Résultat du remplacement, envoyé par l'agent juste après l'opération.
+  app.post<{ Params: { id: string }; Body: { ok?: boolean; message?: string } }>(
+    '/api/agent/ssl/:id/result',
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const server = await authAgent(req);
+      if (!server) return reply.code(401).send({ error: 'Jeton invalide' });
+      if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return reply.code(404).send({ error: 'Introuvable' });
+      const ok = req.body?.ok === true;
+      const message = String(req.body?.message ?? '').slice(0, 1000) || null;
+      const rows = await db.query(
+        `UPDATE ssl_jobs SET status = $3, message = $4, updated_at = now()
+          WHERE bundle_id = $1 AND server_id = $2 AND status = 'running' RETURNING server_id`,
+        [req.params.id, server.id, ok ? 'ok' : 'failed', message],
+      );
+      if (!rows.length) return reply.code(404).send({ error: 'Aucun remplacement en cours' });
+      if (ok) req.log.info({ serverId: server.id }, `Certificat SSL remplacé : ${message ?? ''}`);
+      else req.log.warn({ serverId: server.id }, `Échec du remplacement du certificat SSL : ${message ?? ''}`);
+      return { ok: true };
+    },
+  );
 
   // Téléchargement du script agent par un agent authentifié (mise à jour automatique).
   app.get('/api/agent/script', async (req, reply) => {

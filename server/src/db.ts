@@ -95,6 +95,34 @@ ALTER TABLE servers ADD COLUMN IF NOT EXISTS name_source TEXT;
 -- la fiche est supprimée quand l'appareil a disparu de TeamViewer depuis une heure.
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS tv_sources TEXT;
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS tv_missing_since TIMESTAMPTZ;
+-- Certificat SSL commun déposé dans la console ; clé privée chiffrée (AES-GCM, dérivée de SESSION_SECRET),
+-- effaçable une fois le parc à jour.
+CREATE TABLE IF NOT EXISTS ssl_bundles (
+  id          UUID PRIMARY KEY,
+  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  cn          TEXT NOT NULL,
+  subject     TEXT NOT NULL,
+  sans        TEXT NOT NULL,
+  issuer      TEXT NOT NULL,
+  not_before  TIMESTAMPTZ NOT NULL,
+  not_after   TIMESTAMPTZ NOT NULL,
+  thumbprint  TEXT NOT NULL,
+  cert_pem    TEXT NOT NULL,
+  chain_pem   TEXT NOT NULL,
+  key_enc     TEXT
+);
+-- Remplacement du certificat par serveur : pending (demandé), running (fichiers remis à l'agent),
+-- ok, failed.
+CREATE TABLE IF NOT EXISTS ssl_jobs (
+  bundle_id    UUID NOT NULL REFERENCES ssl_bundles(id) ON DELETE CASCADE,
+  server_id    UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  status       TEXT NOT NULL,
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  message      TEXT,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (bundle_id, server_id)
+);
 `;
 
 export async function openDb(): Promise<Db> {

@@ -9,6 +9,7 @@ const SECTIONS = [
   ['alertes', 'Alertes et seuils'],
   ['deploiement', 'Déployer l’agent'],
   ['teamviewer', 'TeamViewer'],
+  ['certificat', 'Certificat SSL'],
   ['mises-a-jour', 'Mises à jour'],
   ['depannage', 'Dépannage'],
 ] as const;
@@ -128,6 +129,8 @@ export default function Help() {
               <dd className="text-muted">
                 Commande d’installation, jetons de déploiement par script, état de la synchronisation TeamViewer.
               </dd>
+              <dt className="font-medium">Certificat SSL</dt>
+              <dd className="text-muted">Dépôt du certificat renouvelé et remplacement sur les serveurs EzGED qui l’utilisent.</dd>
             </dl>
           </Section>
 
@@ -216,6 +219,31 @@ export default function Help() {
             </ul>
             <p className="text-muted">
               Groupe suivi : <code>TEAMVIEWER_GROUPS=EzGED</code> (plusieurs groupes séparés par des virgules).
+            </p>
+          </Section>
+
+          <Section id="certificat" title="Certificat SSL">
+            <p>Renouvellement annuel du certificat commun aux serveurs EzGED, depuis la page Certificat SSL :</p>
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>
+                Déposer les 3 fichiers reçus en une fois : certificat <code>.crt</code>, clé <code>.key</code>, chaîne{' '}
+                <code>.ca-bundle.crt</code>, au format texte PEM. La console vérifie que la clé correspond au certificat et que la chaîne
+                est complète.
+              </li>
+              <li>
+                La page liste les serveurs dont Apache présente un certificat du même nom. « Tester sur ce serveur » en remplace un seul.
+              </li>
+              <li>Après un premier succès, « Déployer sur tous » lance le remplacement sur les autres.</li>
+              <li>Une fois le parc à jour, « Effacer la clé » retire la clé privée de la console.</li>
+            </ol>
+            <p>
+              L’agent remplace les fichiers déclarés dans la configuration Apache (<code>SSLCertificateFile</code>,{' '}
+              <code>SSLCertificateKeyFile</code>, <code>SSLCertificateChainFile</code>), teste la configuration avec{' '}
+              <code>httpd -t</code>, redémarre Apache et vérifie le certificat servi en HTTPS. Au moindre échec, il remet les anciens
+              fichiers. Les fichiers remplacés sont gardés à côté des originaux (<code>digitged.crt.avant-AAAAMMJJ-HHMMSS</code>).
+            </p>
+            <p className="text-muted">
+              Agent 0.4.0 minimum. La clé privée est stockée chiffrée et n’est remise qu’au serveur dont le remplacement est demandé.
             </p>
           </Section>
 
