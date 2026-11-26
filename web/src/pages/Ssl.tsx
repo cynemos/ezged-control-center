@@ -428,7 +428,7 @@ export default function Ssl() {
   );
 }
 
-// Serveurs équipés et adresse publique de chacun (ServerName des sites SSL d'Apache, redirections).
+// Serveurs avec SSL installé et adresse publique de chacun (ServerName des sites SSL d'Apache, redirections).
 function Sites({ data }: { data: SslStatus }) {
   const [q, setQ] = useState("");
   const term = q.trim().toLowerCase();
@@ -443,7 +443,7 @@ function Sites({ data }: { data: SslStatus }) {
     <section className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-base font-semibold">
-          Serveurs équipés ({data.sites.length})
+          Serveurs avec SSL ({data.sites.length})
         </h2>
         <input
           placeholder="Rechercher serveur, client, adresse…"
@@ -548,7 +548,9 @@ function Sites({ data }: { data: SslStatus }) {
           </tbody>
         </table>
         {rows.length === 0 && (
-          <p className="py-8 text-center text-muted">Aucun serveur.</p>
+          <p className="py-8 text-center text-muted">
+            Aucun serveur avec certificat SSL.
+          </p>
         )}
       </div>
     </section>

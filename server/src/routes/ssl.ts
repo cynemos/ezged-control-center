@@ -82,21 +82,24 @@ export function sslRoutes(priv: FastifyInstance, db: Db) {
     const fleetCerts = [...names.values()].sort((a, b) => b.servers - a.servers);
     // Serveurs équipés et leurs adresses publiques (ServerName des sites SSL, redirections).
     const domain = (bundle?.cn ?? fleetCerts[0]?.cn ?? '').replace(/^\*\./, '');
-    const sites = rows.map((r) => {
-      const certs = r.inventory?.certificates ?? [];
-      const next = certs.reduce<(typeof certs)[number] | null>((a, c) => (!a || c.notAfter < a.notAfter ? c : a), null);
-      return {
-        id: r.id,
-        name: r.name,
-        client: r.client,
-        agentVersion: r.agent_version,
-        online: Boolean(r.last_seen && Date.now() - new Date(r.last_seen).getTime() < ONLINE_MS),
-        known: Array.isArray(r.inventory?.apacheSites),
-        links: siteLinks(r.inventory, domain),
-        certNotAfter: next?.notAfter ?? null,
-        certDaysLeft: next?.daysLeft ?? null,
-      };
-    });
+    // Serveurs où SSL est installé : un certificat dans la configuration Apache, ou un site SSL.
+    const sites = rows
+      .filter((r) => (r.inventory?.certificates ?? []).length > 0 || (r.inventory?.apacheSites ?? []).some((s) => s.ssl))
+      .map((r) => {
+        const certs = r.inventory?.certificates ?? [];
+        const next = certs.reduce<(typeof certs)[number] | null>((a, c) => (!a || c.notAfter < a.notAfter ? c : a), null);
+        return {
+          id: r.id,
+          name: r.name,
+          client: r.client,
+          agentVersion: r.agent_version,
+          online: Boolean(r.last_seen && Date.now() - new Date(r.last_seen).getTime() < ONLINE_MS),
+          known: Array.isArray(r.inventory?.apacheSites),
+          links: siteLinks(r.inventory, domain),
+          certNotAfter: next?.notAfter ?? null,
+          certDaysLeft: next?.daysLeft ?? null,
+        };
+      });
     if (!bundle) return { bundle: null, agentMin: SSL_AGENT_MIN, sitesAgentMin: SITES_AGENT_MIN, domain, fleetCerts, sites, targets: [] };
 
     const jobs = new Map(

@@ -246,7 +246,7 @@ export default function Help() {
               Agent 0.4.0 minimum. La clé privée est stockée chiffrée et n’est remise qu’au serveur dont le remplacement est demandé.
             </p>
             <p>
-              Le tableau « Serveurs équipés » donne l’adresse publique de chaque serveur (<code>xx.digitged.fr</code> et son port, souvent
+              Le tableau « Serveurs avec SSL » donne l’adresse publique de chaque serveur où un certificat est installé (<code>xx.digitged.fr</code> et son port, souvent
               4430), lue dans les <code>ServerName</code> et redirections de la configuration Apache (agent 0.4.1).
             </p>
           </Section>
